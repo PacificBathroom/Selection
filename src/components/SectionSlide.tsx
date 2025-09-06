@@ -1,7 +1,5 @@
-import React, { useRef, useState } from 'react';
+import React, { useState } from 'react';
 import { Product, Section } from '../types';
-import html2canvas from 'html2canvas';
-import jsPDF from 'jspdf';
 
 type Props = {
   section: Section;
@@ -32,8 +30,6 @@ export default function SectionSlide({ section, onUpdate, index }: Props) {
     try {
       const r = await searchPrecero(query);
       setResults(r.slice(0, 8));
-      // Auto-pick first result? Uncomment if you want auto-load:
-      // if (r[0]) onPick(r[0].url);
     } finally {
       setLoading(false);
     }
@@ -101,7 +97,7 @@ export default function SectionSlide({ section, onUpdate, index }: Props) {
         </button>
       </div>
 
-      {/* Search results mini-list */}
+      {/* Search results */}
       {results.length > 0 && (
         <div className="grid sm:grid-cols-2 gap-2">
           {results.map(r => (
@@ -143,7 +139,10 @@ export default function SectionSlide({ section, onUpdate, index }: Props) {
 
           <div className="space-y-6">
             <div>
-              <h3 className="font-semibold mb-2">{section.product.name} {section.product.code && <span className="text-slate-500 text-sm">({section.product.code})</span>}</h3>
+              <h3 className="font-semibold mb-2">
+                {section.product.name}{' '}
+                {section.product.code && <span className="text-slate-500 text-sm">({section.product.code})</span>}
+              </h3>
               {section.product.description && <p className="text-slate-700">{section.product.description}</p>}
             </div>
 
