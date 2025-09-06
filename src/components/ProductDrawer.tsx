@@ -37,9 +37,7 @@ export default function ProductDrawer({ product, onClose }: Props) {
     if (jd) setJobDate(jd);
   }, []);
 
-  // ✅ Hard guard + local non-null variable for strict TS
   if (!product) return null;
-  const p: Product = product;
 
   async function exportPDF() {
     const node = contentRef.current!;
@@ -61,7 +59,7 @@ export default function ProductDrawer({ product, onClose }: Props) {
         if (remaining > 0) pdf.addPage();
       }
     }
-    pdf.save(`${p.code || p.id}.pdf`);
+    pdf.save(`${product.code || product.id}.pdf`);
   }
 
   return (
@@ -71,8 +69,8 @@ export default function ProductDrawer({ product, onClose }: Props) {
         {/* Header row */}
         <div className="p-6 border-b flex items-start justify-between">
           <div>
-            <h2 className="text-2xl font-semibold leading-tight">{p.name}</h2>
-            <p className="text-sm text-slate-500">{p.code}</p>
+            <h2 className="text-2xl font-semibold leading-tight">{product.name}</h2>
+            <p className="text-sm text-slate-500">{product.code}</p>
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -105,7 +103,7 @@ export default function ProductDrawer({ product, onClose }: Props) {
             </div>
             <div className="text-right">
               {jobDate && <div className="text-xs text-slate-600">Date: {jobDate}</div>}
-              {p.price && <div className="font-semibold mt-1">{p.price}</div>}
+              {product.price && <div className="font-semibold mt-1">{product.price}</div>}
             </div>
           </div>
 
@@ -114,8 +112,8 @@ export default function ProductDrawer({ product, onClose }: Props) {
             {/* Left column: images */}
             <div className="space-y-4">
               <div className="aspect-[4/3] bg-slate-100 rounded-xl overflow-hidden">
-                {p.image ? (
-                  <img src={p.image} alt={p.name} className="h-full w-full object-cover" />
+                {product.image ? (
+                  <img src={product.image} alt={product.name} className="h-full w-full object-cover" />
                 ) : (
                   <div className="h-full w-full flex items-center justify-center text-slate-400">
                     No image
@@ -123,9 +121,9 @@ export default function ProductDrawer({ product, onClose }: Props) {
                 )}
               </div>
 
-              {(p.gallery ?? []).length > 0 && (
+              {(product.gallery ?? []).length > 0 && (
                 <div className="grid grid-cols-4 gap-3">
-                  {(p.gallery ?? []).map((g: string, i: number) => (
+                  {(product.gallery ?? []).map((g: string, i: number) => (
                     <img key={i} src={g} className="h-20 w-full object-cover rounded-lg" />
                   ))}
                 </div>
@@ -134,29 +132,29 @@ export default function ProductDrawer({ product, onClose }: Props) {
 
             {/* Right column: content */}
             <div className="space-y-6">
-              {p.description && (
+              {product.description && (
                 <div>
                   <h3 className="font-semibold mb-2">Overview</h3>
-                  <p className="text-slate-700">{p.description}</p>
+                  <p className="text-slate-700">{product.description}</p>
                 </div>
               )}
 
-              {(p.features ?? []).length > 0 && (
+              {(product.features ?? []).length > 0 && (
                 <div>
                   <h3 className="font-semibold mb-2">Key Features</h3>
                   <ul className="list-disc list-inside space-y-1 text-slate-700 text-sm">
-                    {(p.features ?? []).map((f: string, i: number) => (
+                    {(product.features ?? []).map((f: string, i: number) => (
                       <li key={i}>{f}</li>
                     ))}
                   </ul>
                 </div>
               )}
 
-              {(p.specs ?? []).length > 0 && (
+              {(product.specs ?? []).length > 0 && (
                 <div>
                   <h3 className="font-semibold mb-2">Technical Specifications</h3>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-sm">
-                    {(p.specs ?? []).map(
+                    {(product.specs ?? []).map(
                       (s: { label: string; value: string }, i: number) => (
                         <div key={i} className="flex justify-between border-b py-1">
                           <span className="text-slate-500">{s.label}</span>
@@ -168,41 +166,48 @@ export default function ProductDrawer({ product, onClose }: Props) {
                 </div>
               )}
 
-              {(p.compliance ?? []).length > 0 && (
+              {(product.compliance ?? []).length > 0 && (
                 <div>
                   <h3 className="font-semibold mb-2">Compliance & Ratings</h3>
                   <div className="flex flex-wrap gap-2">
-                    {(p.compliance ?? []).map((c: string, i: number) => (
+                    {(product.compliance ?? []).map((c: string, i: number) => (
                       <Tag key={i}>{c}</Tag>
                     ))}
                   </div>
                 </div>
               )}
 
-              {(p.assets ?? []).length > 0 && (
+              {(product.assets ?? []).length > 0 && (
                 <div>
                   <h3 className="font-semibold mb-2">Resources & Downloads</h3>
                   <div className="flex flex-wrap gap-2">
-                    {(p.assets ?? []).map((a: { label: string; url: string }, i: number) => (
-                      <a
-                        key={i}
-                        href={a.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="rounded-lg border px-3 py-2 text-sm hover:bg-slate-50"
-                      >
-                        {a.label}
-                      </a>
-                    ))}
+                    {(product.assets ?? []).map(
+                      (a: { label: string; url: string }, i: number) => (
+                        <a
+                          key={i}
+                          href={a.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="rounded-lg border px-3 py-2 text-sm hover:bg-slate-50"
+                        >
+                          {a.label}
+                        </a>
+                      )
+                    )}
                   </div>
                 </div>
               )}
 
-              {p.sourceUrl && (
+              {product.sourceUrl && (
                 <p className="text-xs text-slate-500">
                   Imported from{' '}
-                  <a className="underline" href={p.sourceUrl} target="_blank" rel="noreferrer">
-                    {p.sourceUrl}
+                  <a
+                    className="underline"
+                    href={product.sourceUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {product.sourceUrl}
                   </a>
                 </p>
               )}
