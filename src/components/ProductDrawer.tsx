@@ -1,10 +1,9 @@
-// src/components/ProductDrawer.tsx
 import React, { useEffect, useRef, useState } from 'react';
 import { Product } from '../types';
 import Tag from './Tag';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
-import logo from '../assets/logo.png';
+import { LOGO_URL } from '../constants/brand';
 
 type Props = {
   product: Product | null;
@@ -13,8 +12,6 @@ type Props = {
 
 export default function ProductDrawer({ product, onClose }: Props) {
   const contentRef = useRef<HTMLDivElement>(null);
-
-  // Header values (mirrors Header.tsx; read here for PDF header)
   const [projectName, setProjectName] = useState<string>('Pacific Bathroom Project');
   const [contactName, setContactName] = useState<string>('Your Name');
   const [contactEmail, setContactEmail] = useState<string>('you@example.com');
@@ -39,7 +36,7 @@ export default function ProductDrawer({ product, onClose }: Props) {
     if (jd) setJobDate(jd);
   }, []);
 
-  // Guard null + use non-null local for strict TS
+  // Strict-TS: guard and non-null local
   if (!product) return null;
   const p: Product = product;
 
@@ -49,16 +46,17 @@ export default function ProductDrawer({ product, onClose }: Props) {
     const imgData = canvas.toDataURL('image/png');
     const pdf = new jsPDF('p', 'mm', 'a4');
     const pageW = pdf.internal.pageSize.getWidth();
+    const pageH = pdf.internal.pageSize.getHeight();
     const imgW = pageW;
     const imgH = (canvas.height * imgW) / canvas.width;
 
-    if (imgH <= pdf.internal.pageSize.getHeight()) {
+    if (imgH <= pageH) {
       pdf.addImage(imgData, 'PNG', 0, 0, imgW, imgH);
     } else {
       let remaining = imgH;
       while (remaining > 0) {
         pdf.addImage(imgData, 'PNG', 0, 0, imgW, imgH);
-        remaining -= pdf.internal.pageSize.getHeight();
+        remaining -= pageH;
         if (remaining > 0) pdf.addPage();
       }
     }
@@ -96,7 +94,7 @@ export default function ProductDrawer({ product, onClose }: Props) {
           {/* Brand strip */}
           <div className="flex items-center justify-between border rounded-xl p-4 bg-slate-50">
             <div className="flex items-center gap-3">
-              <img src={logo} alt="Pacific Bathroom" className="h-10 w-auto" />
+              <img src={LOGO_URL} alt="Pacific Bathroom" className="h-10 w-auto" />
               <div className="leading-tight text-sm">
                 <div className="font-semibold">{projectName}</div>
                 <div className="text-slate-600">Contact: {contactName}</div>
