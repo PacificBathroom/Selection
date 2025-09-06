@@ -14,7 +14,7 @@ type Props = {
 export default function ProductDrawer({ product, onClose }: Props) {
   const contentRef = useRef<HTMLDivElement>(null);
 
-  // Header details (editable in Header.tsx; read here for PDF header)
+  // Header values (mirrors Header.tsx; read here for PDF header)
   const [projectName, setProjectName] = useState<string>('Pacific Bathroom Project');
   const [contactName, setContactName] = useState<string>('Your Name');
   const [contactEmail, setContactEmail] = useState<string>('you@example.com');
@@ -39,7 +39,7 @@ export default function ProductDrawer({ product, onClose }: Props) {
     if (jd) setJobDate(jd);
   }, []);
 
-  // Guard and non-null local for strict TS
+  // Guard null + use non-null local for strict TS
   if (!product) return null;
   const p: Product = product;
 
@@ -49,17 +49,16 @@ export default function ProductDrawer({ product, onClose }: Props) {
     const imgData = canvas.toDataURL('image/png');
     const pdf = new jsPDF('p', 'mm', 'a4');
     const pageW = pdf.internal.pageSize.getWidth();
-    const pageH = pdf.internal.pageSize.getHeight();
     const imgW = pageW;
     const imgH = (canvas.height * imgW) / canvas.width;
 
-    if (imgH <= pageH) {
+    if (imgH <= pdf.internal.pageSize.getHeight()) {
       pdf.addImage(imgData, 'PNG', 0, 0, imgW, imgH);
     } else {
       let remaining = imgH;
       while (remaining > 0) {
         pdf.addImage(imgData, 'PNG', 0, 0, imgW, imgH);
-        remaining -= pageH;
+        remaining -= pdf.internal.pageSize.getHeight();
         if (remaining > 0) pdf.addPage();
       }
     }
