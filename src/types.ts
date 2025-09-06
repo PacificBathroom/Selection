@@ -20,3 +20,8 @@ export type Product = {
   tags?: string[];
   sourceUrl?: string;
 };
+export type Section = {
+  id: string;
+  title: string;           // e.g., "Bathroom 1"
+  product?: Product;       // selected product for this section
+};
