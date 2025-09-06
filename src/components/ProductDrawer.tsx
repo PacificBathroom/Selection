@@ -101,21 +101,31 @@ export default function ProductDrawer({ product, onClose }: Props) {
               </div>
               {product.gallery && product.gallery.length > 0 && (
                 <div className="grid grid-cols-4 gap-3">
-                  {product.gallery.map((g, i) => (<img key={i} src={g} className="h-20 w-full object-cover rounded-lg" />))}
-                </div>
-              )}
-            </div>
+                 {(product.gallery ?? []).map((g: string, i: number) => (
+  <img key={i} src={g} className="h-20 w-full object-cover rounded-lg" />
+))}
 
-            <div className="space-y-6">
-              {product.description && (<div><h3 className="font-semibold mb-2">Overview</h3><p className="text-slate-700">{product.description}</p></div>)}
-              {product.features && product.features.length > 0 && (<div><h3 className="font-semibold mb-2">Key Features</h3><ul className="list-disc list-inside space-y-1 text-slate-700 text-sm">{product.features.map((f, i) => <li key={i}>{f}</li>)}</ul></div>)}
-              {product.specs && product.specs.length > 0 && (<div><h3 className="font-semibold mb-2">Technical Specifications</h3><div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-sm">{product.specs.map((s, i) => (<div key={i} className="flex justify-between border-b py-1"><span className="text-slate-500">{s.label}</span><span className="font-medium">{s.value}</span></div>))}</div></div>)}
-              {product.compliance && product.compliance.length > 0 && (<div><h3 className="font-semibold mb-2">Compliance & Ratings</h3><div className="flex flex-wrap gap-2">{product.compliance.map((c, i) => <Tag key={i}>{c}</Tag>)}</div></div>)}
-              {product.assets && product.assets.length > 0 && (<div><h3 className="font-semibold mb-2">Resources & Downloads</h3><div className="flex flex-wrap gap-2">{product.assets.map((a, i) => (<a key={i} href={a.url} target="_blank" className="rounded-lg border px-3 py-2 text-sm hover:bg-slate-50">{a.label}</a>))}</div></div>)}
-              {product.sourceUrl && (<p className="text-xs text-slate-500">Imported from <a className="underline" href={product.sourceUrl} target="_blank" rel="noreferrer">{product.sourceUrl}</a></p>)}
-            </div>
-          </div>
-        </div>
+{(product.features ?? []).map((f: string, i: number) => (
+  <li key={i}>{f}</li>
+))}
+
+{(product.specs ?? []).map((s: {label: string; value: string}, i: number) => (
+  <div key={i} className="flex justify-between border-b py-1">
+    <span className="text-slate-500">{s.label}</span>
+    <span className="font-medium">{s.value}</span>
+  </div>
+))}
+
+{(product.compliance ?? []).map((c: string, i: number) => (
+  <Tag key={i}>{c}</Tag>
+))}
+
+{(product.assets ?? []).map((a: {label: string; url: string}, i: number) => (
+  <a key={i} href={a.url} target="_blank" className="rounded-lg border px-3 py-2 text-sm hover:bg-slate-50">
+    {a.label}
+  </a>
+))}
+
       </div>
     </div>
   );
