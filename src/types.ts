@@ -23,6 +23,6 @@ export type Product = {
 
 export type Section = {
   id: string;
-  title: string;
+  title: string;    // e.g., "Bathroom 1"
   product?: Product;
 };
