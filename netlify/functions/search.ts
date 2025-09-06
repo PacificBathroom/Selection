@@ -13,7 +13,6 @@ export const handler: Handler = async (event) => {
   const $ = cheerio.load(html);
   const items: { title: string; url: string; image?: string }[] = [];
 
-  // Typical WooCommerce search results
   $('ul.products li.product').each((_, el) => {
     const a = $(el).find('a.woocommerce-LoopProduct-link').first();
     const href = a.attr('href');
@@ -22,7 +21,6 @@ export const handler: Handler = async (event) => {
     if (href && title) items.push({ title, url: href, image: img });
   });
 
-  // Fallback (blog-like listing)
   if (items.length === 0) {
     $('a[href*="/product/"]').each((_, a) => {
       const href = $(a).attr('href');
