@@ -1,38 +1,31 @@
-export type Spec = { label: string; value: string };
-export type Asset = { label: string; url: string };
+// src/types.ts
+
+export type Asset = {
+  label?: string;
+  href?: string;   // <— ensure href exists (optional)
+};
+
+export type Spec = {
+  label: string;
+  value: string;
+};
 
 export type Product = {
   id: string;
-  code?: string;
   name: string;
-  brand?: string;
-  category?: string;
+  code?: string;
+  description?: string;
   image?: string;
   gallery?: string[];
-  description?: string;
   features?: string[];
   specs?: Spec[];
-  compliance?: string[];
-  finish?: string;
-  colourOptions?: string[];
   price?: string;
-  assets?: Asset[];
-  tags?: string[];
+  assets?: Asset[];    // <— aligns with SectionSlide usage
   sourceUrl?: string;
 };
 
 export type Section = {
   id: string;
   title: string;
-  product?: Product;
-};
-
-export type ClientInfo = {
-  clientName: string;
-  clientEmail?: string;
-  clientPhone?: string;
-  clientAddress?: string;
-  projectName?: string;
-  siteAddress?: string;
-  dateISO?: string; // YYYY-MM-DD
+  product?: Product;   // use undefined (not null) when empty
 };
