@@ -23,6 +23,16 @@ export type Product = {
 
 export type Section = {
   id: string;
-  title: string;    // e.g., "Bathroom 1"
+  title: string;
   product?: Product;
+};
+
+export type ClientInfo = {
+  clientName: string;
+  clientEmail?: string;
+  clientPhone?: string;
+  clientAddress?: string;
+  projectName?: string;
+  siteAddress?: string;
+  dateISO?: string; // YYYY-MM-DD
 };
