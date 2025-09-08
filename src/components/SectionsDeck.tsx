@@ -12,6 +12,25 @@ const newSection = (title: string): Section => ({
   title,
   product: null
 });
+{section.product?.assets?.length ? (
+  <div className="mt-6">
+    <h4 className="text-sm font-semibold text-slate-700 mb-2">Downloads</h4>
+    <ul className="space-y-2">
+      {section.product.assets.map((a, i) => (
+        <li key={i}>
+          <a
+            href={a.href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-blue-600 underline"
+          >
+            {a.label || 'Download'}
+          </a>
+        </li>
+      ))}
+    </ul>
+  </div>
+) : null}
 
 export default function SectionsDeck() {
   const [sections, setSections] = useState<Section[]>([ newSection('Bathroom 1') ]);
