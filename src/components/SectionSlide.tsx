@@ -27,47 +27,52 @@ export default function SectionSlide({ section, onUpdate, index }: Props) {
   const [results, setResults] = useState<SearchItem[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  async function doSearch() {
-    setLoading(true); setError(null);
-    try {
-      const res = await fetch('/.netlify/functions/search?q=' + encodeURIComponent(query));
-      const data = await res.json();
-      setResults(Array.isArray(data.results) ? data.results : []);
-    } catch (e: any) {
-      setError(e?.message || 'Search failed');
-    } finally {
-      setLoading(false);
-    }
+ async function doSearch() {
+  setLoading(true); setError(null);
+  try {
+    const res = await fetch(
+      '/.netlify/functions/search?q=' + encodeURIComponent(query)
+    );
+    const data = await safeJson(res);
+    setResults(Array.isArray(data.results) ? data.results : []);
+  } catch (e: any) {
+    setError(e?.message || 'Search failed');
+  } finally {
+    setLoading(false);
   }
+}
 
-  async function pick(item: SearchItem) {
-    try {
-      setLoading(true);
-      const res = await fetch('/.netlify/functions/scrape?url=' + encodeURIComponent(item.url));
-      const data = await res.json();
-      const product: Product = {
-        id: data.id || crypto.randomUUID(),
-        name: data.name || item.title,
-        code: data.code,
-        description: data.description,
-        image: data.image || item.image,
-        gallery: data.gallery,
-        specs: data.specs || [],
-        features: data.features || [],
-        assets: data.assets || [],
-        price: data.price,
-        sourceUrl: data.sourceUrl || item.url,
-      } as Product;
-      onUpdate({ ...section, product });
-      setResults([]);
-      setQuery('');
-    } catch (e: any) {
-      setError(e?.message || 'Import failed');
-    } finally {
-      setLoading(false);
-    }
+async function pick(item: SearchItem) {
+  setLoading(true); setError(null);
+  try {
+    const res = await fetch(
+      '/.netlify/functions/scrape?url=' + encodeURIComponent(item.url)
+    );
+    const data = await safeJson(res);
+
+    const product: Product = {
+      id: data.id || crypto.randomUUID(),
+      name: data.name || item.title,
+      code: data.code,
+      description: data.description,
+      image: data.image || item.image,
+      gallery: data.gallery || [],
+      features: data.features || [],
+      specs: data.specs || [],
+      price: data.price,
+      assets: data.assets || [],
+      sourceUrl: data.sourceUrl || item.url,
+    };
+
+    onUpdate({ ...section, product });
+    setResults([]);
+    setQuery('');
+  } catch (e: any) {
+    setError(e?.message || 'Import failed');
+  } finally {
+    setLoading(false);
   }
-
+}
   return (
     <div className="bg-white rounded-2xl border shadow-card p-6">
       <div className="flex items-center justify-between mb-4">
