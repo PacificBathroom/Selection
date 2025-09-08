@@ -1,184 +1,144 @@
 import React, { useState } from 'react';
-import { Product, Section } from '../types';
+import type { Section, Product } from '../types';
 
 type Props = {
   section: Section;
   onUpdate: (s: Section) => void;
-  index: number;
 };
 
-async function searchPrecero(query: string) {
-  const res = await fetch(`/.netlify/functions/search?q=${encodeURIComponent(query)}`);
-  if (!res.ok) throw new Error('Search failed');
-  const data = await res.json();
-  return (data.results ?? []) as { title: string; url: string; image?: string }[];
-}
+type SearchItem = { title: string; url: string; image?: string };
 
-async function importFromUrl(url: string) {
-  const res = await fetch(`/.netlify/functions/scrape?url=${encodeURIComponent(url)}`);
-  if (!res.ok) throw new Error('Import failed');
-  return await res.json();
-}
-
-export default function SectionSlide({ section, onUpdate, index }: Props) {
+export default function SectionSlide({ section, onUpdate }: Props) {
   const [query, setQuery] = useState('');
-  const [results, setResults] = useState<{ title: string; url: string; image?: string }[]>([]);
   const [loading, setLoading] = useState(false);
+  const [results, setResults] = useState<SearchItem[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
-  async function onSearch() {
-    setLoading(true);
+  async function doSearch() {
+    setLoading(true); setError(null);
     try {
-      const r = await searchPrecero(query);
-      setResults(r.slice(0, 8));
+      const res = await fetch('/.netlify/functions/search?q=' + encodeURIComponent(query));
+      const data = await res.json();
+      setResults(Array.isArray(data.results) ? data.results : []);
+    } catch (e: any) {
+      setError(e?.message || 'Search failed');
     } finally {
       setLoading(false);
     }
   }
 
-  async function onPick(url: string) {
-    setLoading(true);
+  async function pick(item: SearchItem) {
+    // fetch full product details
     try {
-      const data = await importFromUrl(url);
+      setLoading(true);
+      const res = await fetch('/.netlify/functions/scrape?url=' + encodeURIComponent(item.url));
+      const data = await res.json();
       const product: Product = {
-        id: data.code || data.id || crypto.randomUUID(),
+        id: data.id || crypto.randomUUID(),
+        name: data.name || item.title,
         code: data.code,
-        name: data.name || data.title || 'Imported Product',
-        brand: data.brand,
-        category: data.category,
-        image: data.image,
-        gallery: data.gallery,
         description: data.description,
-        features: data.features,
-        specs: data.specs,
-        compliance: data.compliance,
-        finish: data.finish,
-        colourOptions: data.colourOptions,
+        image: data.image || item.image,
+        gallery: data.gallery,
+        specs: data.specs || [],
+        features: data.features || [],
+        assets: data.assets || [],
         price: data.price,
-        assets: data.assets,
-        tags: data.tags,
-        sourceUrl: url,
-      };
+        sourceUrl: data.sourceUrl || item.url,
+      } as Product;
       onUpdate({ ...section, product });
       setResults([]);
       setQuery('');
+    } catch (e: any) {
+      setError(e?.message || 'Import failed');
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <div className="bg-white rounded-2xl border shadow-card p-5 space-y-4" id={`slide-${section.id}`}>
-      <div className="flex items-center gap-3">
-        <input
-          value={section.title}
-          onChange={e => onUpdate({ ...section, title: e.target.value })}
-          className="text-lg font-semibold border-b border-dashed focus:outline-none flex-1"
-          aria-label={`Section title ${index+1}`}
-        />
-        <span className="text-xs text-slate-500">Section {index + 1}</span>
+    <div className="bg-white rounded-2xl border shadow-card p-6">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-lg font-semibold">{section.title}</h3>
+        <span className="text-xs text-slate-500">Section {section.order ?? ''}</span>
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex gap-2 mb-3">
         <input
           value={query}
           onChange={e => setQuery(e.target.value)}
-          onKeyDown={e => (e.key === 'Enter' ? onSearch() : null)}
-          placeholder="Search Precero product (e.g. La Casa, Diverter Mixer, SKU)…"
-          className="flex-1 rounded-lg border px-3 py-2 text-sm"
+          placeholder="Search Precero products (e.g., Messina diverter)"
+          className="flex-1 rounded-lg border px-3 py-2"
+          onKeyDown={e => e.key === 'Enter' && doSearch()}
         />
-        <button
-          onClick={onSearch}
-          disabled={loading || !query.trim()}
-          className="rounded-lg bg-brand-600 text-white px-3 py-2 text-sm disabled:opacity-50"
-        >
-          {loading ? 'Searching…' : 'Search'}
-        </button>
+        <button onClick={doSearch} className="rounded-lg bg-blue-600 text-white px-4 py-2">Search</button>
       </div>
+      {error && <div className="text-red-600 text-sm mb-2">{error}</div>}
+      {loading && <div className="text-sm text-slate-500 mb-2">Loading…</div>}
 
       {results.length > 0 && (
-        <div className="grid sm:grid-cols-2 gap-2">
-          {results.map(r => (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {results.map((r, idx) => (
             <button
-              key={r.url}
-              onClick={() => onPick(r.url)}
-              className="flex items-center gap-3 rounded-lg border p-2 text-left hover:bg-slate-50"
+              key={idx}
+              onClick={() => pick(r)}
+              className="flex items-center gap-3 text-left border rounded-lg p-3 hover:bg-slate-50"
+              title="Click to use this product on the page"
             >
-              {r.image ? (
-                <img src={r.image} className="h-12 w-12 object-cover rounded" />
-              ) : (
-                <div className="h-12 w-12 rounded bg-slate-200" />
-              )}
-              <div className="text-sm">{r.title}</div>
+              <div className="h-12 w-12 bg-slate-200 rounded-lg overflow-hidden flex items-center justify-center">
+                {r.image ? <img src={r.image} alt="" className="h-full w-full object-cover" /> : null}
+              </div>
+              <div className="font-medium">{r.title}</div>
             </button>
           ))}
         </div>
       )}
 
-      {section.product ? (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="space-y-4">
-            <div className="aspect-[4/3] bg-slate-100 rounded-xl overflow-hidden">
+      {!results.length && !section.product && (
+        <p className="text-xs text-slate-500 mt-3">Search and pick a product to populate this page.</p>
+      )}
+
+      {section.product && (
+        <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div>
+            <div className="aspect-video bg-slate-100 rounded-xl overflow-hidden flex items-center justify-center">
               {section.product.image ? (
-                <img src={section.product.image} alt={section.product.name} className="h-full w-full object-cover" />
+                <img src={section.product.image} alt={section.product.name} className="h-full w-full object-contain" />
               ) : (
-                <div className="h-full w-full flex items-center justify-center text-slate-400">No image</div>
+                <div className="text-slate-400 text-sm">No image</div>
               )}
             </div>
-            {(section.product.gallery ?? []).length > 0 && (
-              <div className="grid grid-cols-4 gap-3">
-                {(section.product.gallery ?? []).map((g, i) => (
-                  <img key={i} src={g} className="h-20 w-full object-cover rounded-lg" />
-                ))}
-              </div>
-            )}
+            <div className="mt-3 text-sm text-slate-500">Source: <a href={section.product.sourceUrl} className="underline" target="_blank" rel="noreferrer">{section.product.sourceUrl}</a></div>
           </div>
+          <div>
+            <h4 className="text-xl font-semibold">{section.product.name}</h4>
+            {section.product.code && <div className="text-slate-500 mb-2">Code: {section.product.code}</div>}
+            <p className="text-slate-700 mb-3">{section.product.description}</p>
 
-          <div className="space-y-6">
-            <div>
-              <h3 className="font-semibold mb-2">
-                {section.product.name}{' '}
-                {section.product.code && <span className="text-slate-500 text-sm">({section.product.code})</span>}
-              </h3>
-              {section.product.description && <p className="text-slate-700">{section.product.description}</p>}
-            </div>
-
-            {(section.product.features ?? []).length > 0 && (
-              <div>
-                <h4 className="font-semibold mb-2">Key Features</h4>
-                <ul className="list-disc list-inside space-y-1 text-slate-700 text-sm">
-                  {(section.product.features ?? []).map((f, i) => <li key={i}>{f}</li>)}
+            {section.product.features?.length > 0 && (
+              <div className="mb-4">
+                <div className="text-sm font-semibold mb-1">Features</div>
+                <ul className="list-disc ml-5 text-sm text-slate-700 space-y-1">
+                  {section.product.features.slice(0,8).map((f, i) => <li key={i}>{f}</li>)}
                 </ul>
               </div>
             )}
 
-            {(section.product.specs ?? []).length > 0 && (
+            {section.product.specs?.length > 0 && (
               <div>
-                <h4 className="font-semibold mb-2">Technical Specifications</h4>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-sm">
-                  {(section.product.specs ?? []).map((s, i) => (
-                    <div key={i} className="flex justify-between border-b py-1">
-                      <span className="text-slate-500">{s.label}</span>
-                      <span className="font-medium">{s.value}</span>
+                <div className="text-sm font-semibold mb-1">Specifications</div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+                  {section.product.specs.slice(0,12).map((s, i) => (
+                    <div key={i} className="border rounded-lg p-2">
+                      <div className="text-slate-500">{s.label}</div>
+                      <div className="font-medium">{s.value}</div>
                     </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {(section.product.assets ?? []).length > 0 && (
-              <div>
-                <h4 className="font-semibold mb-2">Resources & Downloads</h4>
-                <div className="flex flex-wrap gap-2">
-                  {(section.product.assets ?? []).map((a, i) => (
-                    <a key={i} href={a.url} target="_blank" className="rounded-lg border px-3 py-2 text-sm hover:bg-slate-50">{a.label}</a>
                   ))}
                 </div>
               </div>
             )}
           </div>
         </div>
-      ) : (
-        <div className="text-sm text-slate-500">Search and pick a product to populate this page.</div>
       )}
     </div>
   );
