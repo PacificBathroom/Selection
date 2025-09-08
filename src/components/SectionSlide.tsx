@@ -1,3 +1,15 @@
+// at top of file
+type SearchItem = { title: string; url: string; image?: string };
+
+async function safeJson(res: Response) {
+  const ct = res.headers.get('content-type') || '';
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (!ct.includes('application/json')) {
+    const text = await res.text();
+    throw new Error(`Expected JSON, got: ${text.slice(0,120)}…`);
+  }
+  return res.json();
+}
 import React, { useState } from 'react';
 import type { Section, Product } from '../types';
 
