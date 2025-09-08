@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from 'react';
-import logo from '../assets/logo.png';
 
 function today() {
   const d = new Date();
@@ -40,7 +39,7 @@ export default function Header() {
     <header className="sticky top-0 z-40 bg-white/80 backdrop-blur border-b">
       <div className="mx-auto max-w-7xl px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <img src={logo} alt="Pacific Bathroom" className="h-12 w-auto" />
+          <img src="/logo.png" alt="Pacific Bathroom" className="h-12 w-auto" />
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1">
             <input value={projectName} onChange={e=>setProjectName(e.target.value)} className="text-lg font-semibold border-b border-dashed bg-transparent focus:outline-none col-span-2"/>
             <input value={contactName} onChange={e=>setContactName(e.target.value)} className="text-xs text-slate-600 border-b border-dashed bg-transparent focus:outline-none"/>
