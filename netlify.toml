@@ -1,4 +1,3 @@
-# netlify.toml
 [build]
   command = "npm install && npm run build"
   publish = "dist"
@@ -7,8 +6,8 @@
   directory = "netlify/functions"
   node_bundler = "esbuild"
 
-# Optional: support /api/* routing if your frontend calls /api/... 
+# SPA fallback
 [[redirects]]
-  from = "/api/*"
-  to = "/.netlify/functions/:splat"
+  from = "/*"
+  to = "/index.html"
   status = 200
