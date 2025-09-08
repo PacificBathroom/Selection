@@ -68,7 +68,6 @@ export default function SectionSlide({ section, onUpdate, index }: Props) {
 
   return (
     <div className="bg-white rounded-2xl border shadow-card p-5 space-y-4" id={`slide-${section.id}`}>
-      {/* Title row */}
       <div className="flex items-center gap-3">
         <input
           value={section.title}
@@ -79,7 +78,6 @@ export default function SectionSlide({ section, onUpdate, index }: Props) {
         <span className="text-xs text-slate-500">Section {index + 1}</span>
       </div>
 
-      {/* Search row */}
       <div className="flex items-center gap-2">
         <input
           value={query}
@@ -97,7 +95,6 @@ export default function SectionSlide({ section, onUpdate, index }: Props) {
         </button>
       </div>
 
-      {/* Search results */}
       {results.length > 0 && (
         <div className="grid sm:grid-cols-2 gap-2">
           {results.map(r => (
@@ -117,7 +114,6 @@ export default function SectionSlide({ section, onUpdate, index }: Props) {
         </div>
       )}
 
-      {/* Slide body */}
       {section.product ? (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="space-y-4">
