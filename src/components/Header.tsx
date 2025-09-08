@@ -28,6 +28,14 @@ export default function Header() {
     if (jd) setJobDate(jd);
   }, []);
 
+  useEffect(() => {
+    localStorage.setItem('projectName', projectName);
+    localStorage.setItem('contactName', contactName);
+    localStorage.setItem('contactEmail', contactEmail);
+    localStorage.setItem('contactPhone', contactPhone);
+    sessionStorage.setItem('jobDate', jobDate);
+  }, [projectName, contactName, contactEmail, contactPhone, jobDate]);
+
   return (
     <header className="sticky top-0 z-40 bg-white/80 backdrop-blur border-b">
       <div className="mx-auto max-w-7xl px-4 py-3 flex items-center justify-between">
