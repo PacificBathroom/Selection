@@ -1,164 +1,101 @@
+// netlify/functions/scrape.ts
 import type { Handler } from '@netlify/functions';
 import * as cheerio from 'cheerio';
 
-const text = (s?: string | null) => (s || '').replace(/\s+/g, ' ').trim();
-const arr = <T>(x: T | T[] | undefined | null) => (Array.isArray(x) ? x : x ? [x] : []);
-const abs = (u: string | undefined, base: URL) => (u ? new URL(u, base).toString() : undefined);
+const isProductUrl = (href?: string) =>
+  !!href && /^https?:\/\/(www\.)?precero\.com\.au\/product\/[^/?#]+\/?$/i.test(href);
 
-const pickOG = ($: cheerio.CheerioAPI) => ({
-  title: text($('meta[property="og:title"]').attr('content') || $('title').text()),
-  description: text($('meta[property="og:description"]').attr('content')),
-  image: $('meta[property="og:image"]').attr('content') || undefined,
-});
-
-const pickJSONLD = ($: cheerio.CheerioAPI) => {
-  const out: any = {};
-  $('script[type="application/ld+json"]').each((_, el) => {
-    try {
-      const data = JSON.parse($(el).contents().text());
-      const nodes = Array.isArray(data) ? data : [data];
-      for (const node of nodes) {
-        const types = arr(node['@type']);
-        if (types.includes('Product') || node['@type'] === 'Product') {
-          out.name = out.name || node.name;
-          out.brand = node.brand?.name || node.brand;
-          out.image = out.image || (Array.isArray(node.image) ? node.image[0] : node.image);
-          out.gallery = (out.gallery || []).concat(arr(node.image));
-          out.description = out.description || node.description;
-          out.price = node.offers?.price || out.price;
-          out.code = node.sku || node.mpn || out.code;
-        }
-      }
-    } catch {}
-  });
-  return out;
-};
-
-const pickAssets = ($: cheerio.CheerioAPI, base: URL) => {
-  const assets: { label: string; url: string }[] = [];
-  $('a[href$=".pdf"], a[href$=".PDF"]').each((_, a) => {
-    const url = abs($(a).attr('href'), base);
-    const label = text($(a).text()) || 'Download PDF';
-    if (url) assets.push({ label, url });
-  });
-  return assets;
-};
-
-const pickBulletedFeatures = ($: cheerio.CheerioAPI) => {
-  const feats: string[] = [];
-  $('#tab-description ul li, .woocommerce-Tabs-panel--description ul li, .summary .woocommerce-product-details__short-description ul li').each((_, li) => {
-    const t = text($(li).text());
-    if (t) feats.push(t);
-  });
-  return feats;
-};
-
-function parsePrecero($: cheerio.CheerioAPI, finalUrl: URL) {
-  if (!/\/product\//.test(finalUrl.pathname)) return { error: 'Not a Precero product detail page' };
-
-  const data: any = {};
-
-  data.name = text($('h1.product_title').first().text()) || text($('h1').first().text());
-  data.price = text($('.summary .price').first().text() || $('p.price').first().text()) || undefined;
-  data.code = text($('.product_meta .sku,[itemprop="sku"]').first().text()) || undefined;
-
-  const catFromMeta = text($('.product_meta .posted_in a').first().text());
-  const crumbs = $('.woocommerce-breadcrumb a');
-  const catFromCrumbs = crumbs.length ? text(crumbs.eq(crumbs.length - 2).text()) : '';
-  data.category = catFromMeta || catFromCrumbs || undefined;
-
-  const gallery: string[] = [];
-  $('.woocommerce-product-gallery__image img, .woocommerce-product-gallery img, img.wp-post-image').each((_, img) => {
-    const src = $(img).attr('data-large_image') || $(img).attr('data-src') || $(img).attr('src');
-    const u = abs(src, finalUrl);
-    if (u && !gallery.includes(u)) gallery.push(u);
-  });
-  data.image = gallery[0];
-  data.gallery = gallery;
-
-  const descTab = $('#tab-description, .woocommerce-Tabs-panel--description');
-  data.description = text(descTab.text()) || text($('.summary .woocommerce-product-details__short-description').text());
-  const features = pickBulletedFeatures($);
-
-  const specs: { label: string; value: string }[] = [];
-  const pushSpec = (label?: string, value?: string) => {
-    const L = text(label); const V = text(value);
-    if (L && V) specs.push({ label: L, value: V });
-  };
-
-  $('#tab-specifications table tr, .woocommerce-Tabs-panel:contains("Specifications") table tr, .shop_attributes tr, .woocommerce-product-attributes tr, table.woocommerce-product-attributes tr').each((_, tr) => {
-    const label = $(tr).find('th, td').eq(0).text();
-    const value = $(tr).find('td').eq(1).text();
-    pushSpec(label, value);
-  });
-
-  const dimsText = text($('#tab-additional_information:contains(Dimensions), .woocommerce-Tabs-panel--additional_information').text());
-  if (dimsText) specs.push({ label: 'Dimensions', value: dimsText });
-
-  const warrantyText = text($('#tab-warranty, .woocommerce-Tabs-panel:contains("Warranty")').text());
-  if (warrantyText) specs.push({ label: 'Warranty', value: warrantyText });
-
-  const colourOptions: string[] = [];
-  $('.variations_form select[name*="attribute_"] option').each((_, opt) => {
-    const v = text($(opt).text());
-    if (v && v.toLowerCase() != 'choose an option' && !colourOptions.includes(v)) colourOptions.push(v);
-  });
-  if (colourOptions.length === 0) {
-    const finishRow = specs.find(s => /finish|colour|color/i.test(s.label));
-    if (finishRow) data.finish = finishRow.value;
-  } else {
-    data.colourOptions = colourOptions;
-  }
-
-  const bodyText = text($('body').text());
-  const compliance: string[] = [];
-  if (/AS\s*1428(\.1)?\s*:?\s*2021/i.test(bodyText)) compliance.push('AS1428.1:2021');
-
-  const welsText = bodyText.match(/WELS\s*(\d)\s*Star/i);
-  if (welsText) compliance.push(`WELS ${welsText[1]} Star`);
-  $('img[alt*="WELS" i], img[src*="wels" i]').each((_, img) => {
-    const alt = ($(img).attr('alt') || '').toLowerCase();
-    const src = ($(img).attr('src') || '').toLowerCase();
-    const m = alt.match(/(\d)\s*star/) || src.match(/(\d)[-_ ]?star/);
-    if (m) {
-      const tag = `WELS ${m[1]} Star`;
-      if (!compliance.includes(tag)) compliance.push(tag);
-    }
-  });
-
-  const assets = pickAssets($, finalUrl);
-
-  return { name: data.name, brand: 'Precero', category: data.category, image: data.image, gallery: data.gallery, description: data.description, features: features.length ? features : undefined, specs, compliance, code: data.code, price: data.price, finish: data.finish, colourOptions: data.colourOptions, assets };
+function clean(t?: string) {
+  return (t || '').replace(/\s+/g, ' ').trim();
 }
 
 export const handler: Handler = async (event) => {
-  const url = event.queryStringParameters?.url;
-  if (!url) return { statusCode: 400, body: JSON.stringify({ error: 'Missing url' }) } as any;
-
-  const finalUrl = new URL(url);
-  const resp = await fetch(url, { headers: { 'user-agent': 'Mozilla/5.0' } });
-  if (!resp.ok) return { statusCode: 500, body: JSON.stringify({ error: 'Fetch failed' }) } as any;
-
-  const html = await resp.text();
-  const $ = cheerio.load(html);
-
-  const og = pickOG($);
-  const ld = pickJSONLD($);
-
-  let out: any = {};
-  if (finalUrl.hostname.includes('precero.com.au')) {
-    const specific = parsePrecero($, finalUrl);
-    if ((specific as any).error) {
-      return { statusCode: 422, body: JSON.stringify({ error: 'URL is not a Precero product page' }) } as any;
+  try {
+    const url = event.queryStringParameters?.url || '';
+    if (!isProductUrl(url)) {
+      return { statusCode: 400, body: JSON.stringify({ error: 'Provide a valid Precero product URL' }) } as any;
     }
-    out = { ...specific };
-  } else {
-    out = { ...og, ...ld, assets: pickAssets($, finalUrl) };
+
+    const resp = await fetch(url, { headers: { 'user-agent': 'Mozilla/5.0' } });
+    if (!resp.ok) return { statusCode: 500, body: JSON.stringify({ error: 'fetch failed' }) } as any;
+    const html = await resp.text();
+    const $ = cheerio.load(html);
+
+    const name =
+      clean($('h1.product_title').text()) ||
+      $('meta[property="og:title"]').attr('content') ||
+      clean($('title').text());
+
+    const code =
+      clean($('.sku').text()) ||
+      clean($('span:contains("SKU")').next().text()) ||
+      undefined;
+
+    const price =
+      clean($('.price .amount').first().text()) || undefined;
+
+    const description =
+      clean($('.woocommerce-product-details__short-description').text()) ||
+      clean($('#tab-description').text()) ||
+      clean($('meta[name="description"]').attr('content')) ||
+      undefined;
+
+    // Images
+    const gallery: string[] = [];
+    $('figure.woocommerce-product-gallery__image img').each((_, img) => {
+      const src = $(img).attr('data-src') || $(img).attr('src');
+      if (src) gallery.push(src);
+    });
+    const ogImg = $('meta[property="og:image"]').attr('content') || $('img.wp-post-image').attr('src');
+    const image = ogImg || gallery[0];
+
+    // Features: bullet lists near description
+    const features: string[] = [];
+    $('.woocommerce-product-details__short-description ul li, #tab-description ul li').each((_, li) => {
+      const t = clean($(li).text());
+      if (t) features.push(t);
+    });
+
+    // Specs table: look for tables with two columns
+    type Spec = { label: string; value: string };
+    const specs: Spec[] = [];
+    $('table').each((_, table) => {
+      const headers = $(table).find('th').length;
+      const rows = $(table).find('tr').length;
+      if (rows && headers <= 2) {
+        $(table).find('tr').each((__, tr) => {
+          const label = clean($(tr).find('th, td').first().text());
+          const value = clean($(tr).find('td').last().text());
+          if (label && value && label.toLowerCase() !== value.toLowerCase()) {
+            specs.push({ label, value });
+          }
+        });
+      }
+    });
+
+    const assets: { label: string; href: string }[] = [];
+    $('a[href$=".pdf"], a[href$=".doc"], a[href$=".docx"]').each((_, a) => {
+      const href = $(a).attr('href') || '';
+      const label = clean($(a).text()) || href.split('/').pop() || 'Download';
+      if (href) assets.push({ label, href });
+    });
+
+    const payload = {
+      id: code || name || url,
+      sourceUrl: url,
+      name,
+      code,
+      price,
+      description,
+      image,
+      gallery,
+      features,
+      specs,
+      assets
+    };
+
+    return { statusCode: 200, body: JSON.stringify(payload) } as any;
+  } catch (err: any) {
+    return { statusCode: 500, body: JSON.stringify({ error: err?.message || 'scrape failed' }) } as any;
   }
-
-  out = { title: og.title || out.title, description: og.description || out.description, image: out.image || og.image ? abs(out.image || og.image, finalUrl) : undefined, ...out };
-  if (out.gallery) out.gallery = out.gallery.map((g: string) => abs(g, finalUrl));
-  if (out.assets) out.assets = out.assets.map((a: any) => ({ ...a, url: abs(a.url, finalUrl) }));
-
-  return { statusCode: 200, headers: { 'content-type': 'application/json' }, body: JSON.stringify(out) } as any;
 };
