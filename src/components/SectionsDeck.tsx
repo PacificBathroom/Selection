@@ -1,5 +1,5 @@
 import React from 'react';
-import { Section } from '../types';
+import { Section, ClientInfo } from '../types';
 import SectionSlide from './SectionSlide';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
@@ -7,6 +7,7 @@ import jsPDF from 'jspdf';
 type Props = {
   sections: Section[];
   setSections: (s: Section[]) => void;
+  client?: ClientInfo;
 };
 
 export default function SectionsDeck({ sections, setSections }: Props) {
@@ -34,10 +35,22 @@ export default function SectionsDeck({ sections, setSections }: Props) {
     const pdf = new jsPDF('p', 'mm', 'a4');
     let first = true;
 
+    const front = document.getElementById('slide-front');
+    if (front) {
+      const canvas = await html2canvas(front, { scale: 2, useCORS: true });
+      const pageW = pdf.internal.pageSize.getWidth();
+      const pageH = pdf.internal.pageSize.getHeight();
+      const imgW = pageW;
+      const imgH = (canvas.height * imgW) / canvas.width;
+      const imgData = canvas.toDataURL('image/png');
+      if (!first) pdf.addPage();
+      first = false;
+      pdf.addImage(imgData, 'PNG', 0, 0, imgW, Math.min(imgH, pageH));
+    }
+
     for (const s of sections) {
       const el = document.getElementById(`slide-${s.id}`);
       if (!el) continue;
-
       const canvas = await html2canvas(el, { scale: 2, useCORS: true });
       const pageW = pdf.internal.pageSize.getWidth();
       const pageH = pdf.internal.pageSize.getHeight();
@@ -47,18 +60,7 @@ export default function SectionsDeck({ sections, setSections }: Props) {
 
       if (!first) pdf.addPage();
       first = false;
-
-      if (imgH <= pageH) {
-        pdf.addImage(imgData, 'PNG', 0, 0, imgW, imgH);
-      } else {
-        // naive pagination if the slide is taller than A4
-        let remaining = imgH;
-        while (remaining > 0) {
-          pdf.addImage(imgData, 'PNG', 0, 0, imgW, imgH);
-          remaining -= pageH;
-          if (remaining > 0) pdf.addPage();
-        }
-      }
+      pdf.addImage(imgData, 'PNG', 0, 0, imgW, Math.min(imgH, pageH));
     }
 
     pdf.save('selection.pdf');
@@ -66,13 +68,11 @@ export default function SectionsDeck({ sections, setSections }: Props) {
 
   return (
     <div className="space-y-4">
-      {/* Toolbar */}
       <div className="flex items-center gap-2">
         <button onClick={addSection} className="rounded-lg bg-brand-600 text-white px-3 py-2 text-sm">Add Section</button>
         <button onClick={exportPDF} className="rounded-lg border px-3 py-2 text-sm hover:bg-slate-50">Export Deck (PDF)</button>
       </div>
 
-      {/* Slides */}
       <div className="space-y-6">
         {sections.map((s, i) => (
           <div key={s.id} className="relative">
