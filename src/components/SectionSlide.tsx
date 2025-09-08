@@ -4,11 +4,12 @@ import type { Section, Product } from '../types';
 type Props = {
   section: Section;
   onUpdate: (s: Section) => void;
+  index?: number; // accept index from parent
 };
 
 type SearchItem = { title: string; url: string; image?: string };
 
-export default function SectionSlide({ section, onUpdate }: Props) {
+export default function SectionSlide({ section, onUpdate, index }: Props) {
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<SearchItem[]>([]);
@@ -28,7 +29,6 @@ export default function SectionSlide({ section, onUpdate }: Props) {
   }
 
   async function pick(item: SearchItem) {
-    // fetch full product details
     try {
       setLoading(true);
       const res = await fetch('/.netlify/functions/scrape?url=' + encodeURIComponent(item.url));
@@ -60,7 +60,9 @@ export default function SectionSlide({ section, onUpdate }: Props) {
     <div className="bg-white rounded-2xl border shadow-card p-6">
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-lg font-semibold">{section.title}</h3>
-        <span className="text-xs text-slate-500">Section {section.order ?? ''}</span>
+        {(typeof index === 'number' || typeof (section as any).order === 'number') && (
+          <span className="text-xs text-slate-500">Section { (typeof index === 'number' ? index + 1 : (section as any).order) }</span>
+        )}
       </div>
 
       <div className="flex gap-2 mb-3">
@@ -108,27 +110,31 @@ export default function SectionSlide({ section, onUpdate }: Props) {
                 <div className="text-slate-400 text-sm">No image</div>
               )}
             </div>
-            <div className="mt-3 text-sm text-slate-500">Source: <a href={section.product.sourceUrl} className="underline" target="_blank" rel="noreferrer">{section.product.sourceUrl}</a></div>
+            {section.product.sourceUrl && (
+              <div className="mt-3 text-sm text-slate-500">
+                Source: <a href={section.product.sourceUrl} className="underline" target="_blank" rel="noreferrer">{section.product.sourceUrl}</a>
+              </div>
+            )}
           </div>
           <div>
             <h4 className="text-xl font-semibold">{section.product.name}</h4>
             {section.product.code && <div className="text-slate-500 mb-2">Code: {section.product.code}</div>}
-            <p className="text-slate-700 mb-3">{section.product.description}</p>
+            {section.product.description && <p className="text-slate-700 mb-3">{section.product.description}</p>}
 
-            {section.product.features?.length > 0 && (
+            {(section.product.features?.length ?? 0) > 0 && (
               <div className="mb-4">
                 <div className="text-sm font-semibold mb-1">Features</div>
                 <ul className="list-disc ml-5 text-sm text-slate-700 space-y-1">
-                  {section.product.features.slice(0,8).map((f, i) => <li key={i}>{f}</li>)}
+                  {(section.product.features ?? []).slice(0,8).map((f, i) => <li key={i}>{f}</li>)}
                 </ul>
               </div>
             )}
 
-            {section.product.specs?.length > 0 && (
+            {(section.product.specs?.length ?? 0) > 0 && (
               <div>
                 <div className="text-sm font-semibold mb-1">Specifications</div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
-                  {section.product.specs.slice(0,12).map((s, i) => (
+                  {(section.product.specs ?? []).slice(0,12).map((s, i) => (
                     <div key={i} className="border rounded-lg p-2">
                       <div className="text-slate-500">{s.label}</div>
                       <div className="font-medium">{s.value}</div>
