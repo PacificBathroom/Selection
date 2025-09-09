@@ -1,10 +1,11 @@
-// src/utils/pdfPreview.ts
 import { getDocument } from 'pdfjs-dist';
 import 'pdfjs-dist/build/pdf.worker.min.mjs';
 
+// Renders the first page of a remote PDF URL into a PNG data URL
 export async function renderPdfFirstPageToDataUrl(url: string, maxWidth = 1000): Promise<string> {
-  const loadingTask = getDocument(url);
-  const pdf = await loadingTask.promise;
+  // pdf.js will fetch the URL directly; if CORS blocks it, use the /api/pdf-proxy (see step 4)
+  const loading = getDocument({ url });
+  const pdf = await loading.promise;
   const page = await pdf.getPage(1);
 
   const viewport = page.getViewport({ scale: 1 });
@@ -13,8 +14,8 @@ export async function renderPdfFirstPageToDataUrl(url: string, maxWidth = 1000):
 
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d')!;
-  canvas.width = Math.floor(scaled.width);
-  canvas.height = Math.floor(scaled.height);
+  canvas.width = Math.ceil(scaled.width);
+  canvas.height = Math.ceil(scaled.height);
 
   await page.render({ canvasContext: ctx, viewport: scaled }).promise;
   return canvas.toDataURL('image/png');
