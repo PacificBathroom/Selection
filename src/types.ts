@@ -9,6 +9,7 @@ export type Asset = {
 export type Spec = {
   label: string;
   value: string;
+  category?: string;
 };
 
 export type Product = {
