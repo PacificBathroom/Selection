@@ -22,6 +22,14 @@ export type Product = {
   price?: string;
   assets?: Asset[];    // <— aligns with SectionSlide usage
   sourceUrl?: string;
+  export type ClientInfo = {
+  projectName: string;
+  contactName?: string;
+  contactEmail?: string;
+  contactPhone?: string;
+  jobDate?: string; // ISO YYYY-MM-DD
+};
+
 };
 
 export type Section = {
