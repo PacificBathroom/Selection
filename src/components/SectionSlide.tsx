@@ -115,7 +115,8 @@ export default function SectionSlide({ section, onUpdate }: Props) {
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {results.map((r, i) => (
-            <ResultCard key={i} r={r} onPick={() => importUrl(r.url)} />
+            <ResultCard key={i} r={r} onPick={() => importUrl(r.url)} 
+              />
           ))}
       </div>
     )}
@@ -172,5 +173,4 @@ export default function SectionSlide({ section, onUpdate }: Props) {
         </div>
       </div>
     </div>
-  );
-}
+  )}
