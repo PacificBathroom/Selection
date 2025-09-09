@@ -13,33 +13,30 @@ export default function ProductDrawer({ product, onClose }: Props) {
   if (!product) return null;            // runtime + type guard
   const p: Product = product;           // ✅ non-null cache for TS
 
-  const contentRef = useRef<HTMLDivElement>(null);
+  // inside your component
+const slideRef = useRef<HTMLDivElement>(null);
 
-  async function exportPDF() {
-    if (!contentRef.current) return;
-    const canvas = await html2canvas(contentRef.current, { scale: 2, useCORS: true });
-    const imgData = canvas.toDataURL("image/png");
-    const pdf = new jsPDF("p", "mm", "a4");
-    const pageW = pdf.internal.pageSize.getWidth();
-    const imgH = (canvas.height * pageW) / canvas.width;
-    pdf.addImage(imgData, "PNG", 0, 0, pageW, imgH);
-    pdf.save(`${(p.code || p.name || "product").replace(/\s+/g, "_")}.pdf`);
-  }
+async function exportPDF() {
+  const node = slideRef.current;
+  if (!node) return;
+  const canvas = await html2canvas(node, { scale: 2, useCORS: true });
+  const img = canvas.toDataURL('image/png');
 
-  const normalizedAssets: Asset[] = (p.assets ?? []).map((a) => ({
-    label: a.label,
-    href: a.href ?? a.url,
-    url: a.url ?? a.href,
-  }));
+  const pdf = new jsPDF('p', 'mm', 'a4');
+  const pageW = pdf.internal.pageSize.getWidth();
+  const pageH = pdf.internal.pageSize.getHeight();
+  const imgW = pageW;
+  const imgH = (canvas.height * imgW) / canvas.width;
 
-  return (
-    <div className="fixed inset-0 z-50">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div
-        className="absolute right-0 top-0 h-full w-full max-w-2xl bg-white shadow-xl overflow-y-auto"
-        aria-modal="true"
-        role="dialog"
-      >
+  let y = 0;
+  pdf.addImage(img, 'PNG', 0, y, imgW, imgH);
+  pdf.save(`${p.code || p.name || 'product'}.pdf`);
+}
+
+return (
+  <div ref={slideRef}>
+    {/* your SectionSlide content here */}
+  </div>
         <div className="p-6 border-b flex items-start justify-between">
           <div>
             <h2 className="text-2xl font-semibold leading-tight">{p.name}</h2>
