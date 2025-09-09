@@ -1,9 +1,7 @@
-// src/types.ts
-
 export type Asset = {
   label?: string;
   href?: string;
-  url?: string; // allow either href or url
+  url?: string;
 };
 
 export type Spec = {
@@ -23,26 +21,28 @@ export type Product = {
   price?: string;
   assets?: Asset[];
   sourceUrl?: string;
-
-  // extras used in UI
+  brand?: string;
   tags?: string[];
   compliance?: string[];
-  brand?: string;
-    category?: string;
+  category?: string;
+
+  // ⬇️ new: specification pdf detection + preview image
+  specPdfUrl?: string;
+  specPdfPreviewDataUrl?: string;
 };
 
 export type Section = {
   id: string;
   title: string;
-  product?: Product; // undefined when empty
+  product?: Product;
 };
 
 export type ClientInfo = {
   projectName: string;
-  clientName?: string;   // alias
+  clientName?: string;
+  dateISO?: string;
   contactName?: string;
   contactEmail?: string;
   contactPhone?: string;
-  jobDate?: string;      // ISO date
-  dateISO?: string;      // alias
+  jobDate?: string;
 };
