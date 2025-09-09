@@ -10,8 +10,8 @@ type Props = {
 };
 
 export default function ProductDrawer({ product, onClose }: Props) {
-  // Guard to satisfy TS and avoid rendering with no product
-  if (!product) return null;
+  if (!product) return null;            // runtime + type guard
+  const p: Product = product;           // ✅ non-null cache for TS
 
   const contentRef = useRef<HTMLDivElement>(null);
 
@@ -23,11 +23,10 @@ export default function ProductDrawer({ product, onClose }: Props) {
     const pageW = pdf.internal.pageSize.getWidth();
     const imgH = (canvas.height * pageW) / canvas.width;
     pdf.addImage(imgData, "PNG", 0, 0, pageW, imgH);
-    pdf.save(`${(product.code || product.name || "product").replace(/\s+/g, "_")}.pdf`);
+    pdf.save(`${(p.code || p.name || "product").replace(/\s+/g, "_")}.pdf`);
   }
 
-  // normalize assets so either .href or .url works
-  const normalizedAssets: Asset[] = (product.assets ?? []).map((a) => ({
+  const normalizedAssets: Asset[] = (p.assets ?? []).map((a) => ({
     label: a.label,
     href: a.href ?? a.url,
     url: a.url ?? a.href,
@@ -35,22 +34,16 @@ export default function ProductDrawer({ product, onClose }: Props) {
 
   return (
     <div className="fixed inset-0 z-50">
-      {/* overlay */}
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-
-      {/* drawer */}
       <div
         className="absolute right-0 top-0 h-full w-full max-w-2xl bg-white shadow-xl overflow-y-auto"
         aria-modal="true"
         role="dialog"
       >
-        {/* header */}
         <div className="p-6 border-b flex items-start justify-between">
           <div>
-            <h2 className="text-2xl font-semibold leading-tight">{product.name}</h2>
-            {product.code ? (
-              <p className="text-sm text-slate-500">{product.code}</p>
-            ) : null}
+            <h2 className="text-2xl font-semibold leading-tight">{p.name}</h2>
+            {p.code ? <p className="text-sm text-slate-500">{p.code}</p> : null}
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -68,17 +61,11 @@ export default function ProductDrawer({ product, onClose }: Props) {
           </div>
         </div>
 
-        {/* content */}
         <div ref={contentRef} className="p-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* left column */}
           <div>
             <div className="aspect-square rounded-lg border overflow-hidden bg-white flex items-center justify-center">
-              {product.image ? (
-                <img
-                  src={product.image}
-                  alt={product.name}
-                  className="h-full w-full object-contain"
-                />
+              {p.image ? (
+                <img src={p.image} alt={p.name} className="h-full w-full object-contain" />
               ) : (
                 <div className="text-slate-400 text-sm">No image</div>
               )}
@@ -108,34 +95,31 @@ export default function ProductDrawer({ product, onClose }: Props) {
             ) : null}
           </div>
 
-          {/* right column */}
           <div className="space-y-3">
-            {product.brand ? (
+            {p.brand ? (
               <div className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                {product.brand}
+                {p.brand}
               </div>
             ) : null}
 
-            {product.description ? (
-              <p className="text-slate-700">{product.description}</p>
-            ) : null}
+            {p.description ? <p className="text-slate-700">{p.description}</p> : null}
 
-            {product.features && product.features.length > 0 ? (
+            {p.features && p.features.length > 0 ? (
               <div>
                 <h4 className="text-sm font-semibold text-slate-700 mb-1">Features</h4>
                 <ul className="list-disc pl-5 space-y-1 text-sm">
-                  {product.features.map((f, i) => (
+                  {p.features.map((f, i) => (
                     <li key={i}>{f}</li>
                   ))}
                 </ul>
               </div>
             ) : null}
 
-            {product.specs && product.specs.length > 0 ? (
+            {p.specs && p.specs.length > 0 ? (
               <div>
                 <h4 className="text-sm font-semibold text-slate-700 mb-1">Specifications</h4>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 text-sm">
-                  {product.specs.map((s, i) => (
+                  {p.specs.map((s, i) => (
                     <div key={i} className="flex justify-between gap-3">
                       <span className="text-slate-600">{s.label}</span>
                       <span className="font-medium">{s.value}</span>
@@ -145,20 +129,20 @@ export default function ProductDrawer({ product, onClose }: Props) {
               </div>
             ) : null}
 
-            {product.compliance && product.compliance.length > 0 ? (
+            {p.compliance && p.compliance.length > 0 ? (
               <div>
                 <h4 className="text-sm font-semibold text-slate-700 mb-1">Compliance</h4>
                 <ul className="list-disc pl-5 space-y-1 text-sm">
-                  {product.compliance.map((c, i) => (
+                  {p.compliance.map((c, i) => (
                     <li key={i}>{c}</li>
                   ))}
                 </ul>
               </div>
             ) : null}
 
-            {product.tags && product.tags.length > 0 ? (
+            {p.tags && p.tags.length > 0 ? (
               <div className="flex flex-wrap gap-2">
-                {product.tags.map((t, i) => (
+                {p.tags.map((t, i) => (
                   <span
                     key={i}
                     className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs text-slate-600"
@@ -170,9 +154,7 @@ export default function ProductDrawer({ product, onClose }: Props) {
             ) : null}
           </div>
         </div>
-        {/* /content */}
       </div>
-      {/* /drawer */}
     </div>
   );
 }
