@@ -1,12 +1,13 @@
+// src/components/SectionSlide.tsx
 import React, { useState } from 'react';
 import type { Section, Product, Asset, Spec } from '../types';
+import { renderPdfFirstPageToDataUrl } from '../utils/pdfPreview';
 
 type Props = {
   section: Section;
   onUpdate: (next: Section) => void;
 };
 
-// Result item from the search function
 type SearchItem = {
   title: string;
   url: string;
@@ -37,9 +38,7 @@ export default function SectionSlide({ section, onUpdate }: Props) {
     setLoading(true);
     setErr(null);
     try {
-      const res = await fetch(
-        '/.netlify/functions/search?q=' + encodeURIComponent(q)
-      );
+      const res = await fetch('/.netlify/functions/search?q=' + encodeURIComponent(q));
       const data: { results?: SearchItem[] } = await safeJson(res);
       setResults(Array.isArray(data.results) ? data.results : []);
     } catch (e: unknown) {
@@ -53,17 +52,16 @@ export default function SectionSlide({ section, onUpdate }: Props) {
     setLoading(true);
     setErr(null);
     try {
-      const res = await fetch(
-        '/.netlify/functions/scrape?url=' + encodeURIComponent(item.url)
-      );
+      const res = await fetch('/.netlify/functions/scrape?url=' + encodeURIComponent(item.url));
       const data: Partial<Product> & {
         id?: string;
         assets?: Array<Partial<Asset>>;
         specs?: Array<Partial<Spec>>;
+        specPdfUrl?: string;
       } = await safeJson(res);
 
       // normalize arrays
-      const gallery = Array.isArray(data.gallery) ? data.gallery.filter(Boolean) as string[] : [];
+      const gallery = Array.isArray(data.gallery) ? (data.gallery.filter(Boolean) as string[]) : [];
       const features = Array.isArray(data.features) ? (data.features.filter(Boolean) as string[]) : [];
       const specs = Array.isArray(data.specs)
         ? (data.specs
@@ -80,7 +78,7 @@ export default function SectionSlide({ section, onUpdate }: Props) {
             })) as Asset[])
         : [];
 
-      const nextProduct: Product = {
+      let nextProduct: Product = {
         id: data.id || crypto.randomUUID(),
         name: data.name || item.title,
         code: data.code,
@@ -95,7 +93,19 @@ export default function SectionSlide({ section, onUpdate }: Props) {
         brand: data.brand,
         tags: Array.isArray(data.tags) ? (data.tags.filter(Boolean) as string[]) : [],
         compliance: Array.isArray(data.compliance) ? (data.compliance.filter(Boolean) as string[]) : [],
+        category: data.category,
+        specPdfUrl: data.specPdfUrl,
       };
+
+      // If there's a spec PDF, render page 1 to an image and attach to product
+      if (nextProduct.specPdfUrl) {
+        try {
+          const preview = await renderPdfFirstPageToDataUrl(nextProduct.specPdfUrl, 1200);
+          nextProduct = { ...nextProduct, specPdfPreviewDataUrl: preview };
+        } catch {
+          // ignore preview errors, keep the link in downloads
+        }
+      }
 
       onUpdate({ ...section, product: nextProduct });
       setResults([]);
@@ -109,14 +119,12 @@ export default function SectionSlide({ section, onUpdate }: Props) {
 
   return (
     <div className="space-y-4">
-      {/* Section title inline edit (handled in parent via input) */}
-
       {/* Search bar */}
       <div className="flex items-center gap-2">
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search Precero products… e.g. messina diverter"
+          placeholder="Search Precero products… e.g. la casa mixer"
           className="w-full rounded-lg border px-3 py-2"
         />
         <button
@@ -155,13 +163,14 @@ export default function SectionSlide({ section, onUpdate }: Props) {
       {/* Selected product */}
       {product ? (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Left: Image + downloads */}
+          {/* Left: images (product + spec preview) */}
           <div>
             <div className="aspect-square rounded-lg border overflow-hidden bg-white flex items-center justify-center">
               {product.image ? (
                 <img
                   src={product.image}
                   alt={product.name}
+                  crossOrigin="anonymous"
                   className="h-full w-full object-contain"
                 />
               ) : (
@@ -169,6 +178,21 @@ export default function SectionSlide({ section, onUpdate }: Props) {
               )}
             </div>
 
+            {/* Spec PDF first page preview */}
+            {product.specPdfPreviewDataUrl ? (
+              <div className="mt-4">
+                <div className="aspect-video rounded-lg border overflow-hidden bg-white flex items-center justify-center">
+                  <img
+                    src={product.specPdfPreviewDataUrl}
+                    alt="Specification sheet preview"
+                    crossOrigin="anonymous"
+                    className="h-full w-full object-contain"
+                  />
+                </div>
+              </div>
+            ) : null}
+
+            {/* Downloads list */}
             {Array.isArray(product.assets) && product.assets.length > 0 && (
               <div className="mt-4">
                 <h4 className="text-sm font-semibold text-slate-700 mb-2">Downloads</h4>
@@ -193,16 +217,12 @@ export default function SectionSlide({ section, onUpdate }: Props) {
             )}
           </div>
 
-          {/* Right: Details */}
+          {/* Right: details */}
           <div className="space-y-3">
             <h3 className="text-xl font-semibold leading-tight">{product.name}</h3>
-            {product.code && (
-              <p className="text-sm text-slate-500">{product.code}</p>
-            )}
+            {product.code && <p className="text-sm text-slate-500">{product.code}</p>}
 
-            {product.description && (
-              <p className="text-slate-700">{product.description}</p>
-            )}
+            {product.description && <p className="text-slate-700">{product.description}</p>}
 
             {product.features && product.features.length > 0 && (
               <div>
@@ -255,9 +275,7 @@ export default function SectionSlide({ section, onUpdate }: Props) {
           </div>
         </div>
       ) : (
-        <p className="text-slate-500 text-sm">
-          Search and select a product to populate this page.
-        </p>
+        <p className="text-slate-500 text-sm">Search and select a product to populate this page.</p>
       )}
     </div>
   );
