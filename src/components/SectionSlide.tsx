@@ -4,17 +4,13 @@ import { renderPdfFirstPageToDataUrl } from '../utils/pdfPreview';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 
-type Props = {
-  section: Section;
-  onUpdate: (next: Section) => void;
-};
+type Props = { section: Section; onUpdate: (next: Section) => void };
 
 export default function SectionSlide({ section }: Props) {
   const p = section.product;
   const slideRef = useRef<HTMLDivElement>(null);
   const [specImg, setSpecImg] = useState<string | null>(null);
 
-  // Load a preview image for the product's specifications PDF, if present
   useEffect(() => {
     let cancelled = false;
     setSpecImg(null);
@@ -22,12 +18,10 @@ export default function SectionSlide({ section }: Props) {
     if (!url) return;
 
     renderPdfFirstPageToDataUrl(url, 1000)
-      .then((dataUrl) => !cancelled && setSpecImg(dataUrl))
+      .then((png) => !cancelled && setSpecImg(png))
       .catch(() => !cancelled && setSpecImg(null));
 
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [p?.specPdfUrl]);
 
   if (!p) return null;
@@ -35,13 +29,7 @@ export default function SectionSlide({ section }: Props) {
   async function exportThisSlide() {
     const node = slideRef.current;
     if (!node) return;
-
-    const canvas = await html2canvas(node, {
-      scale: 2,
-      useCORS: true,
-      backgroundColor: '#ffffff',
-    });
-
+    const canvas = await html2canvas(node, { scale: 2, useCORS: true, backgroundColor: '#ffffff' });
     const img = canvas.toDataURL('image/png');
     const pdf = new jsPDF('p', 'mm', 'a4');
     const pageW = pdf.internal.pageSize.getWidth();
@@ -54,34 +42,21 @@ export default function SectionSlide({ section }: Props) {
   return (
     <div className="space-y-3">
       <div className="flex justify-end">
-        <button
-          onClick={exportThisSlide}
-          className="rounded-lg bg-brand-600 text-white px-3 py-1.5 text-sm"
-        >
+        <button onClick={exportThisSlide} className="rounded-lg bg-brand-600 text-white px-3 py-1.5 text-sm">
           Export PDF
         </button>
       </div>
 
-      {/* Capture just this block */}
-      <div
-        ref={slideRef}
-        className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-white p-4 rounded-xl shadow-sm"
-      >
-        {/* LEFT: images */}
+      <div ref={slideRef} className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-white p-4 rounded-xl shadow-sm">
+        {/* Left column: images */}
         <div>
-          {p.image && (
-            <img src={p.image} alt={p.name} className="w-full rounded-lg border" />
-          )}
+          {p.image && <img src={p.image} alt={p.name} className="w-full rounded-lg border" />}
           {specImg && (
-            <img
-              src={specImg}
-              alt="Specifications preview"
-              className="w-full mt-4 rounded-lg border"
-            />
+            <img src={specImg} alt="Specifications preview" className="w-full mt-4 rounded-lg border" />
           )}
         </div>
 
-        {/* RIGHT: details */}
+        {/* Right column: details */}
         <div className="prose max-w-none">
           <h3 className="m-0">{p.name}</h3>
           {p.code && <p className="text-sm text-slate-500 m-0">{p.code}</p>}
