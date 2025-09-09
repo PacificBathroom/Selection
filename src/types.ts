@@ -1,13 +1,4 @@
-export type Asset = {
-  label?: string;
-  href?: string;
-  url?: string;
-};
-
-export type Spec = {
-  label: string;
-  value: string;
-};
+export type Asset = { label: string; url: string };
 
 export type Product = {
   id: string;
@@ -17,18 +8,18 @@ export type Product = {
   image?: string;
   gallery?: string[];
   features?: string[];
-  specs?: Spec[];
-  price?: string;
-  assets?: Asset[];
-  sourceUrl?: string;
-  brand?: string;
-  tags?: string[];
+  specs?: { label: string; value: string }[];
   compliance?: string[];
+  tags?: string[];
+  brand?: string;
   category?: string;
+  sourceUrl?: string;
 
-  // ⬇️ new: specification pdf detection + preview image
+  // NEW: picked by the scraper (best PDF that looks like a spec/data sheet)
   specPdfUrl?: string;
-  specPdfPreviewDataUrl?: string;
+
+  // optional: all discovered PDFs/links
+  assets?: Asset[];
 };
 
 export type Section = {
@@ -38,11 +29,7 @@ export type Section = {
 };
 
 export type ClientInfo = {
-  projectName: string;
+  projectName?: string;
   clientName?: string;
   dateISO?: string;
-  contactName?: string;
-  contactEmail?: string;
-  contactPhone?: string;
-  jobDate?: string;
 };
