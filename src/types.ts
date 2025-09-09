@@ -2,7 +2,8 @@
 
 export type Asset = {
   label?: string;
-  href?: string; // optional but present so a.href compiles
+  href?: string;
+  url?: string; // allow either href or url
 };
 
 export type Spec = {
@@ -22,19 +23,25 @@ export type Product = {
   price?: string;
   assets?: Asset[];
   sourceUrl?: string;
+
+  // extras used in UI
+  tags?: string[];
+  compliance?: string[];
+  brand?: string;
 };
 
 export type Section = {
   id: string;
   title: string;
-  // leave undefined when empty; don't use null
-  product?: Product;
+  product?: Product; // undefined when empty
 };
 
 export type ClientInfo = {
   projectName: string;
+  clientName?: string;   // alias
   contactName?: string;
   contactEmail?: string;
   contactPhone?: string;
-  jobDate?: string; // ISO YYYY-MM-DD
+  jobDate?: string;      // ISO date
+  dateISO?: string;      // alias
 };
