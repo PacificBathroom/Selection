@@ -2,7 +2,7 @@
 
 export type Asset = {
   label?: string;
-  href?: string;   // <— ensure href exists (optional)
+  href?: string; // optional but present so a.href compiles
 };
 
 export type Spec = {
@@ -20,20 +20,21 @@ export type Product = {
   features?: string[];
   specs?: Spec[];
   price?: string;
-  assets?: Asset[];    // <— aligns with SectionSlide usage
+  assets?: Asset[];
   sourceUrl?: string;
-  export type ClientInfo = {
-  projectName: string;
-  contactName?: string;
-  contactEmail?: string;
-  contactPhone?: string;
-  jobDate?: string; // ISO YYYY-MM-DD
-};
-
 };
 
 export type Section = {
   id: string;
   title: string;
-  product?: Product;   // use undefined (not null) when empty
+  // leave undefined when empty; don't use null
+  product?: Product;
+};
+
+export type ClientInfo = {
+  projectName: string;
+  contactName?: string;
+  contactEmail?: string;
+  contactPhone?: string;
+  jobDate?: string; // ISO YYYY-MM-DD
 };
