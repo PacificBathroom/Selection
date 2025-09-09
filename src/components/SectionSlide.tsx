@@ -117,10 +117,8 @@ export default function SectionSlide({ section, onUpdate }: Props) {
           {results.map((r, i) => (
             <ResultCard key={i} r={r} onPick={() => importUrl(r.url)} />
           ))}
-        </div>
       </div>
-    );
-  }
+    )}
 
   // SLIDE MODE (product is defined)
   return (
