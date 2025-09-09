@@ -9,7 +9,6 @@ export type Asset = {
 export type Spec = {
   label: string;
   value: string;
-  category?: string;
 };
 
 export type Product = {
@@ -29,6 +28,7 @@ export type Product = {
   tags?: string[];
   compliance?: string[];
   brand?: string;
+    category?: string;
 };
 
 export type Section = {
