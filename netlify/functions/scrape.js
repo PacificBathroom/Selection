@@ -1,129 +1,186 @@
+// netlify/functions/scrape.js
+// Requires: cheerio (npm i cheerio)
 const cheerio = require('cheerio');
 
-const isProductUrl = (href) =>
-  !!href && /^https?:\/\/(www\.)?precero\.com\.au\/product\/[^/?#]+\/?$/i.test(href);
-
-const clean = (t) => (t || '').replace(/\s+/g, ' ').trim();
-
-function abs(origin, href) {
+function abs(base, href) {
   try {
-    return new URL(href, origin).toString();
+    return new URL(href, base).toString();
   } catch {
-    return href || '';
+    return href;
   }
+}
+
+function textClean(t) {
+  return (t || '').replace(/\s+/g, ' ').trim();
 }
 
 exports.handler = async (event) => {
   try {
-    const url = event.queryStringParameters && event.queryStringParameters.url;
-    if (!isProductUrl(url)) {
+    const url = event.queryStringParameters?.url;
+    if (!url) {
       return {
         statusCode: 400,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ error: "Provide a valid Precero product URL" })
+        body: JSON.stringify({ error: 'Missing ?url= param' }),
       };
     }
 
-    const resp = await fetch(url, { headers: { "user-agent": "Mozilla/5.0" } });
-    if (!resp.ok) {
-      return { statusCode: 500, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ error: "fetch failed" }) };
+    // Fetch page (Node 20 has fetch)
+    const res = await fetch(url, {
+      headers: {
+        'user-agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36',
+        accept: 'text/html,application/xhtml+xml',
+      },
+    });
+    if (!res.ok) {
+      return { statusCode: res.status, body: JSON.stringify({ error: `HTTP ${res.status}` }) };
     }
-
-    const html = await resp.text();
+    const html = await res.text();
     const $ = cheerio.load(html);
 
-    const name =
-      clean($('h1.product_title').text()) ||
-      $('meta[property="og:title"]').attr('content') ||
-      clean($('title').text());
+    // --- NAME / TITLE ---
+    const ogTitle = $('meta[property="og:title"]').attr('content');
+    const schemaTitle = $('[itemtype*="schema.org/Product"] [itemprop="name"]').first().text();
+    const h1 = $('h1').first().text();
+    const name = textClean(ogTitle || schemaTitle || h1);
 
-    const code =
-      clean($('.sku').text()) ||
-      clean($('span:contains("SKU")').next().text()) ||
-      undefined;
+    // --- CODE / SKU (best-effort) ---
+    const skuMeta = $('meta[itemprop="sku"]').attr('content');
+    const skuText =
+      $('[class*="sku"], [data-sku], .product_meta .sku')
+        .first()
+        .text();
+    const code = textClean(skuMeta || skuText);
 
-    const price = clean($('.price .amount').first().text()) || undefined;
+    // --- DESCRIPTION ---
+    const ogDesc = $('meta[property="og:description"]').attr('content');
+    const descSchema = $('[itemtype*="schema.org/Product"] [itemprop="description"]').text();
+    // Many WP product pages have a summary near the top:
+    const mainDesc = $('.summary, .product-summary, .product .summary, .entry-content p')
+      .first()
+      .text();
+    const description = textClean(ogDesc || descSchema || mainDesc);
 
-    const description =
-      clean($('.woocommerce-product-details__short-description').text()) ||
-      clean($('#tab-description').text()) ||
-      clean($('meta[name="description"]').attr('content')) ||
-      undefined;
+    // --- HERO IMAGE ---
+    const ogImg = $('meta[property="og:image"]').attr('content');
+    const schemaImg = $('[itemtype*="schema.org/Product"] [itemprop="image"]').attr('src');
+    const mainImg =
+      $('img.wp-post-image, .product img, .woocommerce-product-gallery__image img').attr('src') ||
+      $('img').first().attr('src');
+    const image = abs(url, ogImg || schemaImg || mainImg || '');
 
-    const gallery = [];
-    $('figure.woocommerce-product-gallery__image img').each((_, img) => {
-      const src = $(img).attr('data-src') || $(img).attr('src');
-      if (src) gallery.push(abs(url, src));
+    // --- GALLERY ---
+    const gallerySet = new Set();
+    $('a.woocommerce-product-gallery__image img, .woocommerce-product-gallery__image img, .product-gallery img, .gallery img').each((_, el) => {
+      const src = $(el).attr('src') || $(el).attr('data-src');
+      if (src) gallerySet.add(abs(url, src));
     });
-    const ogImg = $('meta[property="og:image"]').attr('content') || $('img.wp-post-image').attr('src');
-    const image = ogImg ? abs(url, ogImg) : (gallery[0] || undefined);
+    const gallery = Array.from(gallerySet);
 
-    // ---------- PDF / assets extraction ----------
-    const assets = [];
-    const seen = new Set();
-
-    function pushAsset(label, href) {
-      if (!href) return;
-      const full = abs(url, href);
-      if (seen.has(full)) return;
-      seen.add(full);
-      assets.push({ label: label || full.split('/').pop() || 'Download', href: full });
-    }
-
-    // 1) Any anchor with .pdf
-    $('a[href$=".pdf"], a[href*=".pdf?"]').each((_, a) => {
-      const href = $(a).attr('href') || '';
-      const label = clean($(a).text()) || href.split('/').pop();
-      pushAsset(label, href);
-    });
-
-    // 2) Buttons/links near the "Specifications" tab (Precero often uses a small "PDF" button)
-    // Look within common WooCommerce tab containers
-    $('#tab-specifications, #tab-additional_information, .woocommerce-tabs').find('a, button').each((_, el) => {
-      const $el = $(el);
-      const text = clean($el.text());
-      const href = $el.attr('href') || $el.attr('data-href') || '';
-      if (/\.pdf(\?|$)/i.test(href) || /^pdf$/i.test(text)) {
-        pushAsset(text || 'Specifications PDF', href);
-      }
-    });
-
-    // 3) Safety: any data attributes that might hold a PDF URL
-    $('[data-pdf], [data-file], [data-download]').each((_, el) => {
-      const cand = ($(el).attr('data-pdf') || $(el).attr('data-file') || $(el).attr('data-download') || '').trim();
-      if (/\.pdf(\?|$)/i.test(cand)) pushAsset('PDF', cand);
-    });
-
-    // ---------- Features / specs ----------
+    // --- FEATURES (bullets) ---
     const features = [];
-    $('.woocommerce-product-details__short-description ul li, #tab-description ul li').each((_, li) => {
-      const t = clean($(li).text());
+    // Look for tab/panel labelled Features or lists near description
+    const featureBlocks = $('*[id*="feature"], *[class*="feature"], .product-features, .features');
+    featureBlocks.find('li').each((_, li) => {
+      const t = textClean($(li).text());
       if (t) features.push(t);
     });
+    if (features.length === 0) {
+      // as fallback: first <ul> under product content
+      $('.entry-content ul, .product .summary ul').first().find('li').each((_, li) => {
+        const t = textClean($(li).text());
+        if (t) features.push(t);
+      });
+    }
 
+    // --- SPECIFICATIONS (label/value) ---
     const specs = [];
-    $('table').each((_, table) => {
-      const headers = $(table).find('th').length;
-      const rows = $(table).find('tr').length;
-      if (rows && headers <= 2) {
-        $(table).find('tr').each((__, tr) => {
-          const label = clean($(tr).find('th, td').first().text());
-          const value = clean($(tr).find('td').last().text());
-          if (label && value && label.toLowerCase() !== value.toLowerCase()) {
-            specs.push({ label, value });
-          }
-        });
+    // try tables first
+    $('table:contains(pecification), table:contains(Specifications)').first().find('tr').each((_, tr) => {
+      const tds = $(tr).find('td, th');
+      if (tds.length >= 2) {
+        const label = textClean($(tds[0]).text());
+        const value = textClean($(tds[1]).text());
+        if (label && value) specs.push({ label, value });
       }
     });
+    // fallback: definition lists
+    if (specs.length === 0) {
+      $('dl').first().find('dt').each((i, dt) => {
+        const dd = $(dt).next('dd');
+        const label = textClean($(dt).text());
+        const value = textClean(dd.text());
+        if (label && value) specs.push({ label, value });
+      });
+    }
 
-    const payload = {
-      id: code || name || url,
+    // --- COMPLIANCE / TAGS ---
+    const compliance = [];
+    const tags = [];
+    $('.product_meta .posted_in a, .product_meta .tagged_as a, a[rel="tag"]').each((_, a) => {
+      const t = textClean($(a).text());
+      if (t) tags.push(t);
+    });
+    // best-effort compliance from visible badges/labels
+    $('*[class*="wels"], *[class*="as1428"], *:contains("WELS"), *:contains("AS1428")').each((_, el) => {
+      const t = textClean($(el).text());
+      if (t && !compliance.includes(t)) compliance.push(t);
+    });
+
+    // --- ASSETS / PDFs (prefer ones around "Specifications") ---
+    const assets = [];
+    let specPdfUrl = null;
+    $('a[href$=".pdf"], a[href*=".pdf"]').each((_, a) => {
+      const href = $(a).attr('href');
+      if (!href) return;
+      const label = textClean($(a).text()).toLowerCase();
+      const absolute = abs(url, href);
+      const isSpec =
+        label.includes('spec') ||
+        $(a).closest('*:contains("Specifications")').length > 0;
+      if (!specPdfUrl && isSpec) specPdfUrl = absolute;
+      assets.push({
+        label: textClean($(a).text()) || 'PDF',
+        href: absolute,
+        url: absolute,
+      });
+    });
+    // If no explicit "spec" label found, pick first pdf as specPdfUrl fallback
+    if (!specPdfUrl && assets.length > 0) specPdfUrl = assets[0].url;
+
+    // --- BRAND / CATEGORY (best-effort) ---
+    const brand =
+      textClean($('.brand, .product-brands a, .product_meta .posted_in a').first().text()) || undefined;
+    const category =
+      textClean($('.product_meta .posted_in a').first().text()) || undefined;
+
+    const body = {
+      id: code || name || new Date().getTime().toString(),
+      name,
+      code: code || undefined,
+      description,
+      image,
+      gallery,
+      features,
+      specs,
+      assets,
+      brand,
+      tags,
+      compliance,
       sourceUrl: url,
-      name, code, price, description, image, gallery, features, specs, assets
+      category,
+      specPdfUrl: specPdfUrl || undefined,
     };
 
-    return { statusCode: 200, headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) };
+    return {
+      statusCode: 200,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    };
   } catch (err) {
-    return { statusCode: 500, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ error: "scrape failed" }) };
+    return {
+      statusCode: 500,
+      body: JSON.stringify({ error: String(err?.message || err) }),
+    };
   }
 };
