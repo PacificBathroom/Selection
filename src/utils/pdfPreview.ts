@@ -1,5 +1,11 @@
-import { getDocument } from 'pdfjs-dist';
-import 'pdfjs-dist/build/pdf.worker.min.mjs';
+import { getDocument, GlobalWorkerOptions } from "pdfjs-dist";
+import pdfWorker from "pdfjs-dist/build/pdf.worker.min.mjs";
+
+// tell pdfjs where its worker is
+GlobalWorkerOptions.workerSrc = pdfWorker;
+
+// ... your preview logic
+
 
 // Renders the first page of a remote PDF URL into a PNG data URL
 export async function renderPdfFirstPageToDataUrl(url: string, maxWidth = 1000): Promise<string> {
