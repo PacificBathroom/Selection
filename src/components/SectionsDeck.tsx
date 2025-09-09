@@ -1,7 +1,8 @@
-// src/components/SectionsDeck.tsx
-import React from 'react';
-import SectionSlide from './SectionSlide';
+import React, { useRef } from 'react';
 import type { Section } from '../types';
+import SectionSlide from './SectionSlide';
+import html2canvas from 'html2canvas';
+import jsPDF from 'jspdf';
 
 type Props = {
   sections: Section[];
@@ -9,64 +10,80 @@ type Props = {
 };
 
 export default function SectionsDeck({ sections, setSections }: Props) {
-  function updateSection(index: number, next: Section) {
-    setSections(prev => {
-      const copy = [...prev];
-      copy[index] = next;
-      return copy;
-    });
+  // a ref per slide so we can capture each as a page
+  const framesRef = useRef<Array<HTMLDivElement | null>>([]);
+
+  async function exportDeckPdf() {
+    if (!framesRef.current.length) return;
+    const pdf = new jsPDF('p', 'mm', 'a4');
+    let first = true;
+
+    for (const node of framesRef.current) {
+      if (!node) continue;
+
+      const canvas = await html2canvas(node, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: '#ffffff',
+      });
+
+      const img = canvas.toDataURL('image/png');
+      const pageW = pdf.internal.pageSize.getWidth();
+      const imgW = pageW;
+      const imgH = (canvas.height * imgW) / canvas.width;
+
+      if (!first) pdf.addPage();
+      pdf.addImage(img, 'PNG', 0, 0, imgW, imgH);
+      first = false;
+    }
+
+    pdf.save('selection-deck.pdf');
   }
 
   function addSection() {
-    const newSection: Section = {
-      id: crypto.randomUUID(),
-      title: `Section ${sections.length + 1}`,
-      product: undefined,
-    };
-    setSections(prev => [...prev, newSection]);
-  }
-
-  function removeSection(index: number) {
-    setSections(prev => prev.filter((_, i) => i !== index));
-  }
-
-  function renameSection(index: number, title: string) {
-    setSections(prev => prev.map((s, i) => (i === index ? { ...s, title } : s)));
+    setSections((prev) => [
+      ...prev,
+      {
+        id: crypto.randomUUID(),
+        title: `Section ${prev.length + 1}`,
+        product: undefined,
+      },
+    ]);
   }
 
   return (
-    <div className="space-y-8">
-      <div className="flex items-center gap-3">
+    <div className="space-y-6">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex gap-2">
+          <button
+            onClick={addSection}
+            className="rounded-lg border px-3 py-1.5 text-sm hover:bg-slate-50"
+          >
+            Add Section
+          </button>
+        </div>
+
         <button
-          onClick={addSection}
-          className="rounded-lg bg-blue-600 text-white px-3 py-2"
+          onClick={exportDeckPdf}
+          className="rounded-lg bg-brand-600 text-white px-3 py-1.5 text-sm"
         >
-          ➕ Add Section
+          Export Deck (PDF)
         </button>
       </div>
 
-      {sections.map((section, i) => (
-        <div key={section.id} className="rounded-2xl border p-4">
-          <div className="flex justify-between items-center mb-3">
-            <input
-              value={section.title}
-              onChange={(e) => renameSection(i, e.target.value)}
-              className="text-lg font-semibold border-b border-dashed bg-transparent focus:outline-none"
-            />
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-500">Section {i + 1}</span>
-              <button
-                onClick={() => removeSection(i)}
-                className="rounded border px-2 py-1 text-xs hover:bg-slate-50"
-              >
-                Delete
-              </button>
-            </div>
-          </div>
-
+      {sections.map((section, idx) => (
+        <div
+          key={section.id}
+          ref={(el) => (framesRef.current[idx] = el)}
+          className="bg-white p-4 rounded-xl"
+        >
           <SectionSlide
             section={section}
-            onUpdate={(next) => updateSection(i, next)}
+            onUpdate={(next) =>
+              setSections((prev) =>
+                prev.map((s) => (s.id === next.id ? next : s))
+              )
+            }
           />
         </div>
       ))}
