@@ -1,6 +1,7 @@
+// src/components/SectionsDeck.tsx
 import React from 'react';
-import { Section } from '../types';
 import SectionSlide from './SectionSlide';
+import type { Section } from '../types';
 
 type Props = {
   sections: Section[];
@@ -29,32 +30,46 @@ export default function SectionsDeck({ sections, setSections }: Props) {
     setSections(prev => prev.filter((_, i) => i !== index));
   }
 
+  function renameSection(index: number, title: string) {
+    setSections(prev => prev.map((s, i) => (i === index ? { ...s, title } : s)));
+  }
+
   return (
-    <div className="space-y-6">
-      {sections.map((section, i) => (
-        <div key={section.id} className="relative border rounded-xl shadow-sm">
-          <button
-            onClick={() => removeSection(i)}
-            className="absolute top-2 right-2 text-xs text-red-600 hover:underline"
-          >
-            Remove
-          </button>
-
-          <SectionSlide
-            section={section}
-            onUpdate={next => updateSection(i, next)}
-          />
-        </div>
-      ))}
-
-      <div className="pt-4">
+    <div className="space-y-8">
+      <div className="flex items-center gap-3">
         <button
           onClick={addSection}
-          className="rounded-lg bg-brand-600 text-white px-4 py-2 shadow hover:opacity-90"
+          className="rounded-lg bg-blue-600 text-white px-3 py-2"
         >
           ➕ Add Section
         </button>
       </div>
+
+      {sections.map((section, i) => (
+        <div key={section.id} className="rounded-2xl border p-4">
+          <div className="flex justify-between items-center mb-3">
+            <input
+              value={section.title}
+              onChange={(e) => renameSection(i, e.target.value)}
+              className="text-lg font-semibold border-b border-dashed bg-transparent focus:outline-none"
+            />
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-500">Section {i + 1}</span>
+              <button
+                onClick={() => removeSection(i)}
+                className="rounded border px-2 py-1 text-xs hover:bg-slate-50"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+
+          <SectionSlide
+            section={section}
+            onUpdate={(next) => updateSection(i, next)}
+          />
+        </div>
+      ))}
     </div>
   );
 }
