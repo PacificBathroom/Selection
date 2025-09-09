@@ -1,46 +1,55 @@
-// src/components/ProductDrawer.tsx
-import React, { useRef } from "react";
-import type { Product, Asset } from "../types";
-import html2canvas from "html2canvas";
-import jsPDF from "jspdf";
+import React, { useRef } from 'react';
+import type { Product } from '../types';
+import html2canvas from 'html2canvas';
+import jsPDF from 'jspdf';
 
 type Props = {
-  product?: Product; // undefined when closed
+  product?: Product;
   onClose: () => void;
 };
 
 export default function ProductDrawer({ product, onClose }: Props) {
-  if (!product) return null;            // runtime + type guard
-  const p: Product = product;           // ✅ non-null cache for TS
+  // Guard: nothing to render
+  if (!product) return null;
 
-  // inside your component
-const slideRef = useRef<HTMLDivElement>(null);
+  const slideRef = useRef<HTMLDivElement>(null);
 
-async function exportPDF() {
-  const node = slideRef.current;
-  if (!node) return;
-  const canvas = await html2canvas(node, { scale: 2, useCORS: true });
-  const img = canvas.toDataURL('image/png');
+  async function exportPDF() {
+    const node = slideRef.current;
+    if (!node) return;
 
-  const pdf = new jsPDF('p', 'mm', 'a4');
-  const pageW = pdf.internal.pageSize.getWidth();
-  const pageH = pdf.internal.pageSize.getHeight();
-  const imgW = pageW;
-  const imgH = (canvas.height * imgW) / canvas.width;
+    const canvas = await html2canvas(node, {
+      scale: 2,
+      useCORS: true,
+      backgroundColor: '#ffffff',
+    });
 
-  let y = 0;
-  pdf.addImage(img, 'PNG', 0, y, imgW, imgH);
-  pdf.save(`${p.code || p.name || 'product'}.pdf`);
-}
+    const img = canvas.toDataURL('image/png');
+    const pdf = new jsPDF('p', 'mm', 'a4');
+    const pageW = pdf.internal.pageSize.getWidth();
+    const imgW = pageW;
+    const imgH = (canvas.height * imgW) / canvas.width;
 
-return (
-  <div ref={slideRef}>
-    {/* your SectionSlide content here */}
-  </div>
+    pdf.addImage(img, 'PNG', 0, 0, imgW, imgH);
+    pdf.save(`${product.code || product.name || 'product'}.pdf`);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50">
+      {/* backdrop */}
+      <button
+        aria-label="Close"
+        className="absolute inset-0 bg-black/40"
+        onClick={onClose}
+      />
+
+      {/* drawer */}
+      <div className="absolute right-0 top-0 h-full w-full max-w-2xl bg-white shadow-xl overflow-y-auto">
+        {/* header */}
         <div className="p-6 border-b flex items-start justify-between">
           <div>
-            <h2 className="text-2xl font-semibold leading-tight">{p.name}</h2>
-            {p.code ? <p className="text-sm text-slate-500">{p.code}</p> : null}
+            <h2 className="text-2xl font-semibold leading-tight">{product.name}</h2>
+            {product.code && <p className="text-sm text-slate-500">{product.code}</p>}
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -58,98 +67,98 @@ return (
           </div>
         </div>
 
-        <div ref={contentRef} className="p-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div>
-            <div className="aspect-square rounded-lg border overflow-hidden bg-white flex items-center justify-center">
-              {p.image ? (
-                <img src={p.image} alt={p.name} className="h-full w-full object-contain" />
-              ) : (
-                <div className="text-slate-400 text-sm">No image</div>
+        {/* content to capture for PDF */}
+        <div ref={slideRef} className="p-6">
+          {/* hero + optional spec preview image */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+              {product.image && (
+                <img
+                  src={product.image}
+                  alt={product.name}
+                  className="w-full rounded-lg border"
+                />
               )}
+              {/* If you render a spec preview image elsewhere, you can place it here as a second <img> */}
             </div>
 
-            {normalizedAssets.length > 0 ? (
-              <div className="mt-4">
-                <h4 className="text-sm font-semibold text-slate-700 mb-2">Downloads</h4>
-                <ul className="space-y-1">
-                  {normalizedAssets.map((a, i) => {
-                    const href = a.href ?? a.url;
-                    return (
+            <div className="prose max-w-none">
+              {product.description && <p>{product.description}</p>}
+
+              {!!(product.compliance?.length) && (
+                <>
+                  <h4>Compliance</h4>
+                  <ul>
+                    {product.compliance!.map((c, i) => (
+                      <li key={i}>{c}</li>
+                    ))}
+                  </ul>
+                </>
+              )}
+
+              {!!(product.features?.length) && (
+                <>
+                  <h4>Features</h4>
+                  <ul>
+                    {product.features!.map((f, i) => (
+                      <li key={i}>{f}</li>
+                    ))}
+                  </ul>
+                </>
+              )}
+
+              {!!(product.specs?.length) && (
+                <>
+                  <h4>Specifications</h4>
+                  <table className="w-full text-sm">
+                    <tbody>
+                      {product.specs!.map((s, i) => (
+                        <tr key={i}>
+                          <td className="font-medium pr-3">{s.label}</td>
+                          <td>{s.value}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </>
+              )}
+
+              {!!(product.assets?.length) && (
+                <>
+                  <h4>Downloads</h4>
+                  <ul>
+                    {product.assets!.map((a, i) => (
                       <li key={i}>
                         <a
-                          href={href || "#"}
+                          className="text-brand-700 underline"
+                          href={a.url}
                           target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-blue-600 underline"
+                          rel="noreferrer"
                         >
-                          {a.label || href || "Download"}
+                          {a.label || 'Document'}
                         </a>
                       </li>
-                    );
-                  })}
-                </ul>
-              </div>
-            ) : null}
+                    ))}
+                  </ul>
+                </>
+              )}
+            </div>
           </div>
 
-          <div className="space-y-3">
-            {p.brand ? (
-              <div className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                {p.brand}
-              </div>
-            ) : null}
-
-            {p.description ? <p className="text-slate-700">{p.description}</p> : null}
-
-            {p.features && p.features.length > 0 ? (
-              <div>
-                <h4 className="text-sm font-semibold text-slate-700 mb-1">Features</h4>
-                <ul className="list-disc pl-5 space-y-1 text-sm">
-                  {p.features.map((f, i) => (
-                    <li key={i}>{f}</li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-
-            {p.specs && p.specs.length > 0 ? (
-              <div>
-                <h4 className="text-sm font-semibold text-slate-700 mb-1">Specifications</h4>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 text-sm">
-                  {p.specs.map((s, i) => (
-                    <div key={i} className="flex justify-between gap-3">
-                      <span className="text-slate-600">{s.label}</span>
-                      <span className="font-medium">{s.value}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-
-            {p.compliance && p.compliance.length > 0 ? (
-              <div>
-                <h4 className="text-sm font-semibold text-slate-700 mb-1">Compliance</h4>
-                <ul className="list-disc pl-5 space-y-1 text-sm">
-                  {p.compliance.map((c, i) => (
-                    <li key={i}>{c}</li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-
-            {p.tags && p.tags.length > 0 ? (
-              <div className="flex flex-wrap gap-2">
-                {p.tags.map((t, i) => (
-                  <span
-                    key={i}
-                    className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs text-slate-600"
-                  >
-                    {t}
-                  </span>
-                ))}
-              </div>
-            ) : null}
-          </div>
+          {/* source link */}
+          {product.sourceUrl && (
+            <div className="mt-6 text-xs text-slate-500">
+              Source:&nbsp;
+              <a
+                href={product.sourceUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="underline"
+              >
+                {product.sourceUrl}
+              </a>
+            </div>
+          )}
         </div>
       </div>
     </div>
