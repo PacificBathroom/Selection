@@ -31,10 +31,9 @@ export default function SectionSlide({ section, onUpdate }: Props) {
 
     let cancelled = false;
     renderPdfFirstPageToDataUrl(url, 1000)
-      .then((png) => !cancelled && setSpecImg(png))
-      .catch(() => !cancelled && setSpecImg(null));
-    return () => { cancelled = true; };
-  }, [product?.specPdfUrl]);
+     renderPdfFirstPageToDataUrl(pdfUrl).then((png: string) => {
+  setPdfImage(png);
+});      
 
   // ---------- Export THIS slide ----------
   async function exportThisSlide() {
