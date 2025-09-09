@@ -1,24 +1,27 @@
-import React, { useState } from 'react';
+import React from 'react';
 import SectionSlide from './SectionSlide';
 import type { Section } from '../types';
 
-const makeSection = (title: string): Section => ({
-  id: crypto.randomUUID(),
-  title,
-  // Use undefined (not null) to satisfy Section.product?: Product
-  product: undefined,
-});
+type Props = {
+  sections: Section[];
+  setSections: React.Dispatch<React.SetStateAction<Section[]>>;
+};
 
-export default function SectionsDeck() {
-  const [sections, setSections] = useState<Section[]>([makeSection('Bathroom 1')]);
-
+export default function SectionsDeck({ sections, setSections }: Props) {
   function updateSection(idx: number, next: Section) {
     setSections((s) => s.map((sec, i) => (i === idx ? next : sec)));
   }
 
   function addSection() {
     const count = sections.length + 1;
-    setSections((s) => [...s, makeSection(`Section ${count}`)]);
+    setSections((s) => [
+      ...s,
+      {
+        id: crypto.randomUUID(),
+        title: `Section ${count}`,
+        product: undefined, // keep undefined to match Section type
+      },
+    ]);
   }
 
   function removeSection(idx: number) {
@@ -32,7 +35,10 @@ export default function SectionsDeck() {
   return (
     <div className="space-y-8">
       <div className="flex items-center gap-3">
-        <button onClick={addSection} className="rounded-lg bg-blue-600 text-white px-3 py-2">
+        <button
+          onClick={addSection}
+          className="rounded-lg bg-blue-600 text-white px-3 py-2"
+        >
           Add Section
         </button>
       </div>
