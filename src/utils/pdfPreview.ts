@@ -42,4 +42,6 @@ export async function firstPageAsDataUrl(src: string | ArrayBuffer): Promise<str
 
   // Return PNG data URL
   return canvas.toDataURL('image/png');
+  export const renderPdfFirstPageToDataUrl = firstPageAsDataUrl;
+
 }
