@@ -22,7 +22,13 @@ export default function App() {
       <Header />
       <main className="mx-auto max-w-7xl px-4 py-6 space-y-6">
         <FrontPage client={client} setClient={setClient} />
-        <SectionsDeck sections={sections} setSections={setSections} />
+       <SectionsDeck
+  client={client}
+  setClient={setClient}
+  sections={sections}
+  setSections={setSections}
+/>
+
       </main>
     </div>
   );
