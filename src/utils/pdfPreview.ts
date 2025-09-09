@@ -1,5 +1,8 @@
-import { getDocument, GlobalWorkerOptions } from "pdfjs-dist";
-import pdfWorker from "pdfjs-dist/build/pdf.worker.min.mjs";
+import * as pdfjsLib from 'pdfjs-dist';
+import PdfJsWorker from 'pdfjs-dist/build/pdf.worker.mjs?worker';
+
+pdfjsLib.GlobalWorkerOptions.workerPort = new PdfJsWorker();
+
 
 // tell pdfjs where its worker is
 GlobalWorkerOptions.workerSrc = pdfWorker;
