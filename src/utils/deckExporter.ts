@@ -4,7 +4,15 @@ import type { ClientInfo, Section, Product } from '../types';
 
 const A4_W = 210; // mm
 const A4_H = 297;
-const MARGIN = 14;
+const MARGIN = 16;
+
+/** Simple theme you can tweak */
+const theme = {
+  brandRGB: [31, 106, 238] as [number, number, number], // Tailwind brand-600
+  accentRGB: [197, 148, 21] as [number, number, number], // gold accent
+  textRGB: [0, 0, 0] as [number, number, number],
+  subtextRGB: [90, 90, 90] as [number, number, number],
+};
 
 const viaProxy = (u?: string | null): string | undefined =>
   u ? (/^https?:\/\//i.test(u) ? `/api/pdf-proxy?url=${encodeURIComponent(u)}` : u) : undefined;
@@ -78,37 +86,58 @@ function mm(pdf: jsPDF, text: string, x: number, y: number, maxW: number, fontSi
 }
 
 async function drawCover(pdf: jsPDF, client: ClientInfo, sections: Section[]) {
-  const cx = MARGIN;
-  let y = MARGIN + 10;
+  pdf.setFillColor(...theme.brandRGB);
+  pdf.rect(0, 0, A4_W, 30, 'F'); // top brand band
 
-  // Logo
+  // Logo in band
   const logoData = await fetchDataUrl('/logo.png');
   if (logoData) {
-    const w = 40;
-    const h = 40 * 0.6;
-    pdf.addImage(logoData, 'PNG', cx, y, w, h);
-    y += h + 8;
+    pdf.addImage(logoData, 'PNG', MARGIN, 8, 38, 22);
   }
 
+  // Title area
+  let y = 60;
+  pdf.setTextColor(...theme.textRGB);
   pdf.setFont('helvetica', 'bold');
-  pdf.setFontSize(24);
-  pdf.text(client.projectName || 'Project Selection', cx, y);
+  pdf.setFontSize(28);
+  pdf.text(client.projectName || 'Project Selection', MARGIN, y);
+  y += 12;
+
+  pdf.setDrawColor(...theme.accentRGB);
+  pdf.setLineWidth(1.6);
+  pdf.line(MARGIN, y, A4_W - MARGIN, y); // gold divider
   y += 12;
 
   pdf.setFont('helvetica', 'normal');
+  pdf.setTextColor(...theme.subtextRGB);
   pdf.setFontSize(12);
-  if (client.clientName) y = mm(pdf, `Prepared for ${client.clientName}`, cx, y, 120, 12);
-  if (client.dateISO)    y = mm(pdf, new Date(client.dateISO).toLocaleDateString(), cx, y, 120, 12);
+  if (client.clientName) y = mm(pdf, `Prepared for ${client.clientName}`, MARGIN, y, A4_W - MARGIN * 2, 12);
+  if (client.dateISO)    y = mm(pdf, new Date(client.dateISO).toLocaleDateString(), MARGIN, y, A4_W - MARGIN * 2, 12);
 
-  y += 6;
+  // Contact block (optional)
+  const contactBits = [
+    client.contactName ? `Contact: ${client.contactName}` : '',
+    client.contactEmail ? `Email: ${client.contactEmail}` : '',
+    client.contactPhone ? `Phone: ${client.contactPhone}` : '',
+  ].filter(Boolean);
+  if (contactBits.length) {
+    y += 6;
+    for (const line of contactBits) y = mm(pdf, line, MARGIN, y, 110, 11);
+  }
+
+  // Summary
+  y += 10;
   const totalProducts = sections.reduce((acc, s) => acc + (s.products?.length || 0), 0);
-  pdf.setTextColor(100);
-  mm(pdf, `${sections.length} sections • ${totalProducts} product${totalProducts === 1 ? '' : 's'}`, cx, y, 150, 10);
-  pdf.setTextColor(0);
+  pdf.setTextColor(...theme.textRGB);
+  pdf.setFont('helvetica', 'bold');
+  pdf.setFontSize(12);
+  y = mm(pdf, `${sections.length} section${sections.length === 1 ? '' : 's'} • ${totalProducts} product${totalProducts === 1 ? '' : 's'}`, MARGIN, y, 150, 12);
 
   // Footer
+  pdf.setFont('helvetica', 'normal');
   pdf.setFontSize(9);
-  pdf.text('Built with React + Tailwind  •  Exported from Pacific Bathroom Selection', cx, A4_H - MARGIN);
+  pdf.setTextColor(...theme.subtextRGB);
+  pdf.text('Exported from Pacific Bathroom Selection', MARGIN, A4_H - MARGIN);
 }
 
 async function drawProductSlide(pdf: jsPDF, sectionTitle: string, p: Product) {
@@ -118,22 +147,23 @@ async function drawProductSlide(pdf: jsPDF, sectionTitle: string, p: Product) {
   let yRight = MARGIN + 10;
 
   // Header
+  pdf.setTextColor(...theme.textRGB);
   pdf.setFont('helvetica', 'bold');
   pdf.setFontSize(12);
   pdf.text(sectionTitle, MARGIN, MARGIN);
 
-  // Image (large, left)
+  // Large image (left)
   const imgAbs = absUrl(p.image, p.sourceUrl);
   const imgSrc = viaProxy(imgAbs);
   const imgData = await fetchDataUrl(imgSrc);
   if (imgData) {
     const w = A4_W / 2 - (MARGIN + 2);
-    const h = w * 0.75; // keep decent aspect
-    pdf.addImage(imgData, 'JPEG', leftX, yLeft, w, h, undefined, 'FAST');
+    const h = w * 0.75; // aspect-ish
+    pdf.addImage(imgData, 'PNG', leftX, yLeft, w, h, undefined, 'FAST');
     yLeft += h + 6;
   }
 
-  // Title + link (right)
+  // Title + link + code (right)
   pdf.setFont('helvetica', 'bold');
   pdf.setFontSize(16);
   pdf.text(p.name || 'Product', rightX, yRight);
@@ -141,17 +171,17 @@ async function drawProductSlide(pdf: jsPDF, sectionTitle: string, p: Product) {
 
   if (p.sourceUrl) {
     pdf.setFont('helvetica', 'normal');
-    pdf.setTextColor(46, 88, 148);
+    pdf.setTextColor(...theme.brandRGB);
     yRight = mm(pdf, p.sourceUrl, rightX, yRight, A4_W - rightX - MARGIN, 10);
-    pdf.setTextColor(0);
+    pdf.setTextColor(...theme.textRGB);
   }
 
   if (p.code) {
     pdf.setFontSize(10);
-    pdf.setTextColor(100);
+    pdf.setTextColor(...theme.subtextRGB);
     pdf.text(p.code, rightX, yRight);
     yRight += 6;
-    pdf.setTextColor(0);
+    pdf.setTextColor(...theme.textRGB);
   }
 
   // Description
@@ -170,31 +200,30 @@ async function drawProductSlide(pdf: jsPDF, sectionTitle: string, p: Product) {
     for (const f of p.features) {
       const bullet = '• ' + f;
       yRight = mm(pdf, bullet, rightX, yRight, A4_W - rightX - MARGIN, 11);
+      if (yRight > A4_H - MARGIN - 20) break;
     }
   }
 
-  // Specifications table
+  // Specifications
   const specs = normalizeSpecs(p.specs);
   if (specs.length) {
     pdf.setFont('helvetica', 'bold');
     pdf.text('Specifications', rightX, yRight + 6);
     yRight += 8;
     pdf.setFont('helvetica', 'normal');
-    const labelW = 35;
+    const labelW = 38;
     const colW = A4_W - rightX - MARGIN;
     for (const kv of specs) {
       const label = (kv.label || '').trim();
       const value = (kv.value || '').trim();
-      // label
       pdf.setFont('helvetica', 'bold');
       pdf.setFontSize(11);
       pdf.text(label, rightX, yRight, { maxWidth: labelW });
-      // value
       pdf.setFont('helvetica', 'normal');
       const wrapped = pdf.splitTextToSize(value, colW - labelW - 2);
       pdf.text(wrapped, rightX + labelW + 2, yRight);
       yRight += Math.max(5, wrapped.length * 4.5);
-      if (yRight > A4_H - MARGIN - 15) break; // simple overflow guard
+      if (yRight > A4_H - MARGIN - 15) break;
     }
   }
 }
@@ -202,10 +231,10 @@ async function drawProductSlide(pdf: jsPDF, sectionTitle: string, p: Product) {
 export async function exportDeckPdf({ client, sections }: { client: ClientInfo; sections: Section[] }) {
   const pdf = new jsPDF('p', 'mm', 'a4');
 
-  // COVER
+  // Cover
   await drawCover(pdf, client, sections);
 
-  // SLIDES (one per product)
+  // Slides (one per product)
   for (const s of sections) {
     const prods = s.products || [];
     for (let i = 0; i < prods.length; i++) {
