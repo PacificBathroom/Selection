@@ -186,12 +186,85 @@ export default function SectionSlide({ section, onUpdate }: Props) {
     className="rounded-lg bg-brand-600 text-white px-3 py-1.5 text-sm"
   >
   </div>
+// ...inside return (SLIDE MODE) replace the header area:
 <div className="space-y-3">
-      <div className="flex justify-end">
-        <button onClick={exportThisSlide} className="rounded-lg bg-brand-600 text-white px-3 py-1.5 text-sm">
-          Export PDF
+  {/* Editable section heading + Export button */}
+  <EditableHeading
+    title={section.title || 'Untitled Section'}
+    onChange={(t) => onUpdate({ ...section, title: t })}
+  />
+function EditableHeading({
+  title,
+  onChange,
+}: {
+  title: string;
+  onChange: (t: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(title);
+
+  useEffect(() => setValue(title), [title]);
+
+  function commit() {
+    const v = value.trim() || 'Untitled Section';
+    onChange(v);
+    setEditing(false);
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      {editing ? (
+        <input
+          autoFocus
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') commit();
+            if (e.key === 'Escape') {
+              setValue(title);
+              setEditing(false);
+            }
+          }}
+          className="text-lg font-semibold text-gray-800 border rounded px-2 py-1 w-full max-w-md"
+          aria-label="Section title"
+        />
+      ) : (
+        <h2
+          className="text-lg font-semibold text-gray-800 cursor-text"
+          onDoubleClick={() => setEditing(true)}
+          title="Double-click to rename section"
+        >
+          {title}
+        </h2>
+      )}
+      {!editing && (
+        <button
+          type="button"
+          className="text-xs text-slate-600 hover:text-blue-600 underline"
+          onClick={() => setEditing(true)}
+        >
+          Edit
         </button>
-      </div>
+      )}
+    </div>
+  );
+}
+
+  <div className="flex justify-end">
+    <button onClick={exportThisSlide} className="rounded-lg bg-brand-600 text-white px-3 py-1.5 text-sm">
+      Export PDF
+    </button>
+  </div>
+
+  {/* the rest of your grid below stays the same */}
+  <div
+    ref={slideRef}
+    className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-white p-4 rounded-xl shadow-sm border"
+  >
+    {/* ...existing left/right content */}
+  </div>
+</div>
 
       <div
         ref={slideRef}
