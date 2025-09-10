@@ -1,6 +1,6 @@
 // src/components/SectionSlide.tsx
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import type { Section, Product } from '../types';
+import React, { useEffect, useMemo, useState } from 'react';
+import type { Section, Product, Asset } from '../types';
 import { renderPdfFirstPageToDataUrl } from '../utils/pdfPreview';
 
 type Props = { section: Section; onUpdate: (next: Section) => void };
@@ -309,7 +309,7 @@ export default function SectionSlide({ section, onUpdate }: Props) {
         tags: Array.isArray(data.tags) ? data.tags : undefined,
         sourceUrl: u,
         specPdfUrl: absUrl(data.specPdfUrl, u),
-        // Normalize to {url,label}
+        // Normalize to Asset[]
         assets: Array.isArray(data.assets)
           ? (data.assets as any[])
               .map((a: any) => {
@@ -317,12 +317,11 @@ export default function SectionSlide({ section, onUpdate }: Props) {
                   const uAbs = absUrl(a, u);
                   return uAbs ? { url: uAbs } : null;
                 }
-                const uAbs = absUrl(a && a.url, u);
+                const uAbs = absUrl(a?.url, u);
                 if (!uAbs) return null;
-                const lbl = typeof a?.label === 'string' ? a.label : undefined;
-                return { url: uAbs, label: lbl };
+                return { url: uAbs, label: typeof a?.label === 'string' ? a.label : undefined };
               })
-              .filter((x: any) => !!x)
+              .filter((x: any): x is Asset => !!x) // type predicate removes nulls
           : undefined,
       };
 
