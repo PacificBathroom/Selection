@@ -1,6 +1,4 @@
 // src/components/SectionSlide.tsx
-const fnUrl = (u?: string | null) =>
-  u ? `/.netlify/functions/pdf-proxy?url=${encodeURIComponent(u)}` : undefined;
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { Section, Product } from '../types';
 import { renderPdfFirstPageToDataUrl } from '../utils/pdfPreview';
@@ -8,6 +6,10 @@ import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 
 type Props = { section: Section; onUpdate: (next: Section) => void };
+
+// Route external assets (images/PDFs) through Netlify proxy to avoid CORS/tainted canvas
+const viaProxy = (u?: string | null): string | undefined =>
+  u ? `/api/pdf-proxy?url=${encodeURIComponent(u)}` : undefined;
 
 // Small card for search results
 function ResultCard({
@@ -95,21 +97,21 @@ function EditableHeading({
 }
 
 export default function SectionSlide({ section, onUpdate }: Props) {
-  const product = section.product;
+  const product = section.product as Product | undefined;
   const slideRef = useRef<HTMLDivElement>(null);
   const [specImg, setSpecImg] = useState<string | null>(null);
 
-  // ---------- PDF preview of spec sheet (safe) ----------
+  // ---------- PDF preview of spec sheet ----------
   useEffect(() => {
     setSpecImg(null);
     const url = product?.specPdfUrl;
     if (!url) return;
 
     let cancelled = false;
-
     (async () => {
       try {
-        const png = await renderPdfFirstPageToDataUrl(viaProxy(url)!, 1000);
+        const proxied = viaProxy(url)!;
+        const png = await renderPdfFirstPageToDataUrl(proxied, 1000);
         if (!cancelled) setSpecImg(png);
       } catch (e) {
         console.error('Failed to render PDF preview', e);
@@ -135,7 +137,7 @@ export default function SectionSlide({ section, onUpdate }: Props) {
     const pageH = pdf.internal.pageSize.getHeight();
     const imgW = pageW;
     const imgH = (canvas.height * imgW) / canvas.width;
-    const y = imgH > pageH ? 0 : (pageH - imgH) / 2;
+    const y = imgH > pageH ? 0 : (pageH - imgH) / 2; // center if shorter
     pdf.addImage(img, 'PNG', 0, y, imgW, imgH);
     pdf.save(`${product?.code || product?.name || section.title || 'selection'}.pdf`);
   }
@@ -151,7 +153,7 @@ export default function SectionSlide({ section, onUpdate }: Props) {
     setSearching(true);
     setResults([]);
     try {
-      const res = await fetch(`/.netlify/functions/search?q=${encodeURIComponent(term)}`);
+      const res = await fetch(`/api/search?q=${encodeURIComponent(term)}`);
       const data = await res.json();
       const list = Array.isArray(data) ? data : Array.isArray(data?.results) ? data.results : [];
       setResults(list);
@@ -165,7 +167,7 @@ export default function SectionSlide({ section, onUpdate }: Props) {
 
   async function importUrl(u: string) {
     try {
-      const res = await fetch(`/.netlify/functions/scrape?url=${encodeURIComponent(u)}`);
+      const res = await fetch(`/api/scrape?url=${encodeURIComponent(u)}`);
       const data = await res.json();
 
       const p: Product = {
@@ -182,8 +184,8 @@ export default function SectionSlide({ section, onUpdate }: Props) {
         compliance: data.compliance,
         tags: data.tags,
         sourceUrl: u,
-        specPdfUrl: data.specPdfUrl,
-        assets: data.assets,
+        specPdfUrl: data.specPdfUrl, // from scraper
+        assets: data.assets, // optional
       };
 
       onUpdate({ ...section, product: p });
@@ -225,7 +227,9 @@ export default function SectionSlide({ section, onUpdate }: Props) {
           <button
             type="button"
             onClick={search}
-            className="rounded-lg bg-brand-600 text-white px-3 py-2 text-sm"
+            disabled={searching}
+            className="rounded-lg bg-brand-600 text-white px-3 py-2 text-sm disabled:opacity-60"
+            aria-busy={searching}
           >
             {searching ? 'Searching…' : 'Search'}
           </button>
@@ -271,22 +275,19 @@ export default function SectionSlide({ section, onUpdate }: Props) {
         className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-white p-4 rounded-xl shadow-sm border"
       >
         <div>
-          + {product.image && (
- <img
-     src={viaProxy(product.image)}
-     alt={product.name ?? 'Product image'}
-     className="w-full rounded-lg border"
-   />
- )}
+          {product.image && (
+            <img
+              src={viaProxy(product.image)}
+              alt={product.name ?? 'Product image'}
+              className="w-full rounded-lg border"
+            />
+          )}
 
-          
           {specImg && (
             <img
               src={specImg}
               alt="Specifications preview"
               className="w-full mt-4 rounded-lg border bg-white"
-              crossOrigin="anonymous"
-              referrerPolicy="no-referrer"
             />
           )}
         </div>
