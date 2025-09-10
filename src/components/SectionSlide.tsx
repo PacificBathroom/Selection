@@ -99,7 +99,9 @@ function EditableHeading({
 export default function SectionSlide({ section, onUpdate }: Props) {
   const product = section.product as Product | undefined;
   const slideRef = useRef<HTMLDivElement>(null);
+
   const [specImg, setSpecImg] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   // ---------- PDF preview of spec sheet ----------
   useEffect(() => {
@@ -126,20 +128,27 @@ export default function SectionSlide({ section, onUpdate }: Props) {
   // ---------- Export THIS slide ----------
   async function exportThisSlide() {
     if (!slideRef.current) return;
-    const canvas = await html2canvas(slideRef.current, {
-      scale: 2,
-      useCORS: true,
-      backgroundColor: '#ffffff',
-    });
-    const img = canvas.toDataURL('image/png');
-    const pdf = new jsPDF('p', 'mm', 'a4');
-    const pageW = pdf.internal.pageSize.getWidth();
-    const pageH = pdf.internal.pageSize.getHeight();
-    const imgW = pageW;
-    const imgH = (canvas.height * imgW) / canvas.width;
-    const y = imgH > pageH ? 0 : (pageH - imgH) / 2; // center if shorter
-    pdf.addImage(img, 'PNG', 0, y, imgW, imgH);
-    pdf.save(`${product?.code || product?.name || section.title || 'selection'}.pdf`);
+    try {
+      const canvas = await html2canvas(slideRef.current, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: '#ffffff',
+      });
+      const img = canvas.toDataURL('image/png');
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      const pageW = pdf.internal.pageSize.getWidth();
+      const pageH = pdf.internal.pageSize.getHeight();
+      const imgW = pageW;
+      const imgH = (canvas.height * imgW) / canvas.width;
+      const y = imgH > pageH ? 0 : (pageH - imgH) / 2; // center if shorter
+      pdf.addImage(img, 'PNG', 0, y, imgW, imgH);
+      pdf.save(`${product?.code || product?.name || section.title || 'selection'}.pdf`);
+    } catch (err: any) {
+      console.error('export error', err);
+      setErrorMsg(
+        'Could not export this slide. If you see a "tainted canvas" error in the console, make sure every image/PDF is loaded via the proxy.'
+      );
+    }
   }
 
   // ---------- Search workflow (when no product yet) ----------
@@ -150,47 +159,85 @@ export default function SectionSlide({ section, onUpdate }: Props) {
   async function search() {
     const term = q.trim();
     if (!term) return;
+    setErrorMsg(null);
     setSearching(true);
     setResults([]);
+
     try {
-      const res = await fetch(`/api/search?q=${encodeURIComponent(term)}`);
-      const data = await res.json();
-      const list = Array.isArray(data) ? data : Array.isArray(data?.results) ? data.results : [];
-      setResults(list);
-    } catch (e) {
-      console.error(e);
-      setResults([]);
+      const res = await fetch(`/api/search?q=${encodeURIComponent(term)}`, {
+        headers: { Accept: 'application/json' },
+      });
+
+      if (!res.ok) {
+        const txt = await res.text().catch(() => '');
+        throw new Error(`Search failed (${res.status}). ${txt.slice(0, 200)}`);
+      }
+
+      const data = await res.json().catch(() => ({}));
+
+      // Accept several common shapes: [], {results:[]}, {items:[]}, {data:[]}
+      const list =
+        Array.isArray(data) ? data :
+        Array.isArray((data as any)?.results) ? (data as any).results :
+        Array.isArray((data as any)?.items) ? (data as any).items :
+        Array.isArray((data as any)?.data) ? (data as any).data : [];
+
+      // Normalize to {title,url,image?}
+      const normalized = list
+        .map((r: any) => ({
+          title: r.title ?? r.name ?? r.text ?? 'Untitled',
+          url: r.url ?? r.link ?? r.href ?? '',
+          image: r.image ?? r.thumbnail ?? r.img ?? undefined,
+        }))
+        .filter((r: any) => typeof r.url === 'string' && r.url.length > 0);
+
+      setResults(normalized);
+      if (normalized.length === 0) {
+        setErrorMsg('No results found for that query.');
+      }
+    } catch (e: any) {
+      console.error('search error', e);
+      setErrorMsg(e?.message || 'Search failed. Check the Netlify function logs.');
     } finally {
       setSearching(false);
     }
   }
 
   async function importUrl(u: string) {
+    setErrorMsg(null);
     try {
-      const res = await fetch(`/api/scrape?url=${encodeURIComponent(u)}`);
-      const data = await res.json();
+      const res = await fetch(`/api/scrape?url=${encodeURIComponent(u)}`, {
+        headers: { Accept: 'application/json' },
+      });
+      if (!res.ok) {
+        const txt = await res.text().catch(() => '');
+        throw new Error(`Import failed (${res.status}). ${txt.slice(0, 200)}`);
+      }
+
+      const data = await res.json().catch(() => ({} as any));
 
       const p: Product = {
         id: data.code || data.id || crypto.randomUUID(),
-        code: data.code,
+        code: data.code ?? undefined,
         name: data.name || data.title || 'Imported Product',
-        brand: data.brand,
-        category: data.category,
-        image: data.image,
-        gallery: data.gallery,
-        description: data.description,
-        features: data.features,
-        specs: data.specs,
-        compliance: data.compliance,
-        tags: data.tags,
+        brand: data.brand ?? undefined,
+        category: data.category ?? undefined,
+        image: data.image ?? undefined,
+        gallery: Array.isArray(data.gallery) ? data.gallery : undefined,
+        description: data.description ?? undefined,
+        features: Array.isArray(data.features) ? data.features : undefined,
+        specs: Array.isArray(data.specs) ? data.specs : undefined,
+        compliance: Array.isArray(data.compliance) ? data.compliance : undefined,
+        tags: Array.isArray(data.tags) ? data.tags : undefined,
         sourceUrl: u,
-        specPdfUrl: data.specPdfUrl, // from scraper
-        assets: data.assets, // optional
+        specPdfUrl: data.specPdfUrl ?? undefined,
+        assets: Array.isArray(data.assets) ? data.assets : undefined,
       };
 
       onUpdate({ ...section, product: p });
-    } catch (e) {
-      console.error('Failed to import URL', e);
+    } catch (e: any) {
+      console.error('import error', e);
+      setErrorMsg(e?.message || 'Failed to import product details.');
     }
   }
 
@@ -235,7 +282,13 @@ export default function SectionSlide({ section, onUpdate }: Props) {
           </button>
         </div>
 
-        {results.length === 0 && !searching && (
+        {errorMsg && (
+          <div className="text-sm text-red-600" role="alert">
+            {errorMsg}
+          </div>
+        )}
+
+        {results.length === 0 && !searching && !errorMsg && (
           <div className="text-sm text-slate-500">
             Type a query and click Search to populate this page.
           </div>
@@ -269,6 +322,12 @@ export default function SectionSlide({ section, onUpdate }: Props) {
           Export PDF
         </button>
       </div>
+
+      {errorMsg && (
+        <div className="text-sm text-red-600" role="alert">
+          {errorMsg}
+        </div>
+      )}
 
       <div
         ref={slideRef}
