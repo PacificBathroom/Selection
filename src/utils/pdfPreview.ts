@@ -48,16 +48,18 @@ export async function renderPdfFirstPageToDataUrl(
   return dataUrl;
 }
 
-async function toArrayBuffer(input: PdfInput): Promise<ArrayBuffer> {
+async function toArrayBuffer(input: string | File | ArrayBuffer | Uint8Array): Promise<ArrayBuffer> {
   if (typeof input === 'string') {
-    // Fetch the PDF from a URL (must be CORS-accessible)
     const res = await fetch(input, { mode: 'cors' });
     if (!res.ok) throw new Error(`Failed to fetch PDF: ${res.status} ${res.statusText}`);
     return await res.arrayBuffer();
   }
   if (input instanceof ArrayBuffer) return input;
   if (input instanceof Uint8Array) {
-    return input.buffer.slice(input.byteOffset, input.byteOffset + input.byteLength);
+    // ✅ Copy into a plain ArrayBuffer so the type is correct
+    const ab = new ArrayBuffer(input.byteLength);
+    new Uint8Array(ab).set(input);
+    return ab;
   }
   // File
   return await input.arrayBuffer();
