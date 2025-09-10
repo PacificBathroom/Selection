@@ -19,43 +19,46 @@ function absUrl(u?: string | null, base?: string): string | undefined {
   }
 }
 
-/** Stronger cleaner for ugly scraped text (no replaceAll) */
+/** Strong cleaner for scraped text (no replaceAll) */
 function cleanText(input?: string | null, maxLen = 800): string | undefined {
   if (!input) return undefined;
   let s = String(input);
 
-  // If the blob contains obvious "this is code" sentinels, cut before the first one
+  // Strip HTML tags that might have slipped in
+  s = s.replace(/<\/?[^>]+>/g, ' ');
+
+  // If the blob contains “this is code”, cut before the first sentinel
   const cutKeys = [
     'window._wpemojiSettings',
-    '/*!',           // big comment headers
-    '(function',     // IIFE
-    'function(',     // code
+    '/*!',
+    '(function',
+    'function(',
     'WorkerGlobalScope',
     'createElement("canvas")',
+    'img:is(',
   ];
   let cut = s.length;
   for (const k of cutKeys) {
     const i = s.indexOf(k);
-    if (i >= 80 && i < cut) cut = i; // keep early descriptive text; ignore if sentinel is super early
+    if (i >= 0 && i < cut) cut = i;
   }
   if (cut < s.length) s = s.slice(0, cut);
 
-  // Strip script/style tags if they came through as text
+  // Remove script/style chunks (if present as text), URLs, and mega-“words”
   s = s.replace(/<script[\s\S]*?<\/script>/gi, ' ');
   s = s.replace(/<style[\s\S]*?<\/style>/gi, ' ');
-
-  // Remove very long "words" and bare URLs
   s = s.replace(/\bhttps?:\/\/\S+/gi, ' ');
   s = s.replace(/\S{120,}/g, ' ');
 
   // Normalize whitespace
   s = s.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
 
+  if (!s) return undefined;
   if (s.length > maxLen) s = s.slice(0, maxLen).trimEnd() + '…';
-  return s || undefined;
+  return s;
 }
 
-// Small card used in search results
+// ---------- Search Result Card ----------
 function ResultCard({
   r, onPick,
 }: { r: { title: string; url: string; image?: string }; onPick: () => void }) {
@@ -76,7 +79,7 @@ function ResultCard({
   );
 }
 
-/** Inline editable section heading */
+// ---------- Editable Section Heading ----------
 function EditableHeading({ title, onChange }: { title: string; onChange: (t: string) => void }) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(title);
@@ -126,13 +129,13 @@ function EditableHeading({ title, onChange }: { title: string; onChange: (t: str
   );
 }
 
-/** Product card inside a section (image + spec preview + remove) */
+// ---------- Product Card ----------
 function ProductCard({
   product, onRemove,
 }: { product: Product; onRemove: () => void }) {
   const [specImg, setSpecImg] = useState<string | null>(null);
 
-  // Render first page of spec PDF (via proxy)
+  // Render first page of spec PDF (via proxy) as an image
   useEffect(() => {
     setSpecImg(null);
     const src = absUrl(product.specPdfUrl, product.sourceUrl);
@@ -172,8 +175,7 @@ function ProductCard({
             alt={product.name ?? 'Product image'}
             className="w-full rounded-lg border"
             crossOrigin="anonymous"
-            // If proxy fails, fall back to original for display,
-            // but mark it to be ignored by html2canvas to keep export working.
+            // If proxy fails, show original (display only) and mark to be ignored by html2canvas
             onError={(e) => {
               const el = e.currentTarget as HTMLImageElement;
               if (!el.dataset.tryFallback && imgAbs && imgProxied) {
@@ -259,13 +261,14 @@ function ProductCard({
   );
 }
 
+// ---------- Main component ----------
 export default function SectionSlide({ section, onUpdate }: Props) {
   const [adding, setAdding] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const products = section.products ?? [];
 
-  // Migrate legacy single product → products[0] once
+  // One-time migration: legacy `product` -> `products[0]`
   useEffect(() => {
     if (section.product && (!section.products || section.products.length === 0)) {
       onUpdate({ ...section, products: [section.product], product: undefined });
@@ -273,7 +276,7 @@ export default function SectionSlide({ section, onUpdate }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ---------- Search/import (adds a product) ----------
+  // ----- Search / Import -----
   const [q, setQ] = useState('');
   const [searching, setSearching] = useState(false);
   const [results, setResults] = useState<Array<{ title: string; url: string; image?: string }>>([]);
@@ -325,17 +328,40 @@ export default function SectionSlide({ section, onUpdate }: Props) {
       }
       const data: any = await res.json().catch(() => ({}));
 
+      // Build gallery + assets
+      const galleryAbs = Array.isArray(data.gallery)
+        ? (data.gallery as any[]).map((g) => absUrl(String(g), u)).filter(Boolean) as string[]
+        : undefined;
+
+      const assetUrls = Array.isArray(data.assets)
+        ? (data.assets as any[])
+            .map((a: any) => (typeof a === 'string' ? absUrl(a, u) : absUrl(a?.url, u)))
+            .filter(Boolean) as string[]
+        : [];
+
+      // Select a primary image
+      const firstAssetImg = assetUrls.find((x) => /\.(png|jpe?g|webp|gif|bmp)$/i.test(x));
+      const primaryImage =
+        absUrl(data.image, u) ||
+        (galleryAbs && galleryAbs[0]) ||
+        firstAssetImg ||
+        undefined;
+
+      // Choose a short description
+      const rawDesc = data.shortDescription || data.summary || data.excerpt || data.description;
+      const cleaned = cleanText(rawDesc);
+      const featuresFallback = Array.isArray(data.features) ? cleanText(data.features.join('. ') + '.') : undefined;
+      const finalDescription = cleaned || featuresFallback || undefined;
+
       const p: Product = {
         id: data.code || data.id || crypto.randomUUID(),
         code: data.code ?? undefined,
         name: data.name || data.title || 'Imported Product',
         brand: data.brand ?? undefined,
         category: data.category ?? undefined,
-        image: absUrl(data.image, u),
-        gallery: Array.isArray(data.gallery)
-          ? (data.gallery as any[]).map((g) => absUrl(String(g), u)).filter(Boolean) as string[]
-          : undefined,
-        description: cleanText(data.description),
+        image: primaryImage,
+        gallery: galleryAbs,
+        description: finalDescription,
         features: Array.isArray(data.features) ? data.features : undefined,
         specs: Array.isArray(data.specs) ? data.specs : undefined,
         compliance: Array.isArray(data.compliance) ? data.compliance : undefined,
@@ -358,7 +384,7 @@ export default function SectionSlide({ section, onUpdate }: Props) {
           : undefined,
       };
 
-      const next = [...products, p];
+      const next = [...(section.products ?? []), p];
       onUpdate({ ...section, products: next, product: undefined });
       setAdding(false);
       setQ('');
