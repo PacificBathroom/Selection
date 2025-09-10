@@ -189,16 +189,25 @@ export default function SectionSlide({ section, onUpdate }: Props) {
         className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-white p-4 rounded-xl shadow-sm border"
       >
         <div>
-          {product.image && (
-            <img src={product.image} alt={product.name ?? 'Product image'} className="w-full rounded-lg border" />
-          )}
-          {specImg && (
-            <img
-              src={specImg}
-              alt="Specifications preview"
-              className="w-full mt-4 rounded-lg border bg-white"
-            />
-          )}
+   {product.image && (
+  <img
+    src={product.image}
+    alt={product.name ?? 'Product image'}
+    className="w-full rounded-lg border"
+    crossOrigin="anonymous"
+    referrerPolicy="no-referrer"
+  />
+)}
+{specImg && (
+  <img
+    src={specImg}
+    alt="Specifications preview"
+    className="w-full mt-4 rounded-lg border bg-white"
+    crossOrigin="anonymous"
+    referrerPolicy="no-referrer"
+  />
+)}
+
         </div>
 
         <div className="prose max-w-none">
