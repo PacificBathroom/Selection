@@ -11,7 +11,6 @@ exports.handler = async (event) => {
   try {
     const res = await fetch(url);
     const buf = Buffer.from(await res.arrayBuffer());
-
     return {
       statusCode: res.status,
       headers: {
