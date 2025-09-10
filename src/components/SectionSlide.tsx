@@ -109,7 +109,7 @@ export default function SectionSlide({ section, onUpdate }: Props) {
 
     (async () => {
       try {
-        const png = await renderPdfFirstPageToDataUrl(url, 1000);
+        const png = await renderPdfFirstPageToDataUrl(fnUrl(url)!, 1000);
         if (!cancelled) setSpecImg(png);
       } catch (e) {
         console.error('Failed to render PDF preview', e);
@@ -272,14 +272,14 @@ export default function SectionSlide({ section, onUpdate }: Props) {
       >
         <div>
           {product.image && (
-            <img
-              src={product.image}
-              alt={product.name ?? 'Product image'}
-              className="w-full rounded-lg border"
-              crossOrigin="anonymous"
-              referrerPolicy="no-referrer"
-            />
-          )}
+<img
+     src={fnUrl(product.image)}
+     alt={product.name ?? 'Product image'}
+     className="w-full rounded-lg border"
+   />
+ )}
+
+          
           {specImg && (
             <img
               src={specImg}
