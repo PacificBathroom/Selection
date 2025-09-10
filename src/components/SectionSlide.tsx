@@ -2,14 +2,12 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { Section, Product } from '../types';
 import { renderPdfFirstPageToDataUrl } from '../utils/pdfPreview';
-import html2canvas from 'html2canvas';
-import jsPDF from 'jspdf';
 
 type Props = { section: Section; onUpdate: (next: Section) => void };
 
 /** Route external assets (images/PDFs) through the function to avoid CORS/tainted canvas */
 const viaProxy = (u?: string | null): string | undefined =>
-  u ? `/api/pdf-proxy?url=${encodeURIComponent(u)}` : undefined;
+  u ? (/^https?:\/\//i.test(u) ? `/api/pdf-proxy?url=${encodeURIComponent(u)}` : u) : undefined;
 
 /** Resolve relative URLs (e.g. "/wp-content/...") against a base */
 function absUrl(u?: string | null, base?: string): string | undefined {
@@ -21,7 +19,7 @@ function absUrl(u?: string | null, base?: string): string | undefined {
   }
 }
 
-/** Clean ugly scraped text */
+/** Clean ugly scraped text (uses regex .replace, not .replaceAll) */
 function cleanText(input?: string | null, maxLen = 1200): string | undefined {
   if (!input) return undefined;
   let s = String(input);
@@ -40,8 +38,11 @@ function ResultCard({
   r, onPick,
 }: { r: { title: string; url: string; image?: string }; onPick: () => void }) {
   return (
-    <button type="button" onClick={onPick}
-      className="flex items-center gap-3 p-3 rounded-lg border w-full text-left hover:bg-slate-50">
+    <button
+      type="button"
+      onClick={onPick}
+      className="flex items-center gap-3 p-3 rounded-lg border w-full text-left hover:bg-slate-50"
+    >
       <div className="w-12 h-12 bg-slate-200 rounded overflow-hidden flex items-center justify-center">
         {r.image ? <img src={r.image} alt="" className="w-full h-full object-cover" /> : null}
       </div>
@@ -60,26 +61,42 @@ function EditableHeading({ title, onChange }: { title: string; onChange: (t: str
   useEffect(() => setValue(title), [title]);
   function commit() {
     const v = (value || '').trim() || 'Untitled Section';
-    onChange(v); setEditing(false);
+    onChange(v);
+    setEditing(false);
   }
   return (
     <div className="flex items-center gap-2">
       {editing ? (
-        <input autoFocus value={value} onChange={(e) => setValue(e.target.value)}
+        <input
+          autoFocus
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
           onBlur={commit}
-          onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') { setValue(title); setEditing(false); } }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') commit();
+            if (e.key === 'Escape') {
+              setValue(title);
+              setEditing(false);
+            }
+          }}
           className="text-lg font-semibold text-gray-800 border rounded px-2 py-1 w-full max-w-md"
           aria-label="Section title"
         />
       ) : (
-        <h2 className="text-lg font-semibold text-gray-800 cursor-text"
-            onDoubleClick={() => setEditing(true)} title="Double-click to rename section">
+        <h2
+          className="text-lg font-semibold text-gray-800 cursor-text"
+          onDoubleClick={() => setEditing(true)}
+          title="Double-click to rename section"
+        >
           {title}
         </h2>
       )}
       {!editing && (
-        <button type="button" className="text-xs text-slate-600 hover:text-blue-600 underline"
-                onClick={() => setEditing(true)}>
+        <button
+          type="button"
+          className="text-xs text-slate-600 hover:text-blue-600 underline"
+          onClick={() => setEditing(true)}
+        >
           Edit
         </button>
       )}
@@ -108,13 +125,14 @@ function ProductCard({
       }
     })();
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [product.specPdfUrl, product.sourceUrl]);
 
   const imgAbs = absUrl(product.image, product.sourceUrl);
   const imgProxied = viaProxy(imgAbs);
 
-  // table-like specs?
   const hasTableLikeSpecs = useMemo(() => {
     const s = product?.specs;
     if (!Array.isArray(s) || s.length === 0) return false;
@@ -131,7 +149,7 @@ function ProductCard({
             alt={product.name ?? 'Product image'}
             className="w-full rounded-lg border"
             onError={(e) => {
-              // If the proxy fails, hide the image (no raw fallback)
+              // If proxy fails, hide (no raw fallback -> keeps canvas untainted)
               (e.currentTarget as HTMLImageElement).style.display = 'none';
             }}
           />
@@ -209,12 +227,12 @@ function ProductCard({
 }
 
 export default function SectionSlide({ section, onUpdate }: Props) {
-  const slideRef = useRef<HTMLDivElement>(null);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
   const products = section.products ?? [];
 
-  // One-time: migrate legacy `product` → `products[0]`
+  // Migrate legacy single product → products[0] once
   useEffect(() => {
     if (section.product && (!section.products || section.products.length === 0)) {
       onUpdate({ ...section, products: [section.product], product: undefined });
@@ -222,41 +240,7 @@ export default function SectionSlide({ section, onUpdate }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Export entire section (auto-splits pages if tall)
-  async function exportThisSection() {
-    if (!slideRef.current) return;
-    try {
-      const canvas = await html2canvas(slideRef.current, {
-        scale: 2, useCORS: true, backgroundColor: '#ffffff',
-      });
-      const imgData = canvas.toDataURL('image/png');
-      const pdf = new jsPDF('p', 'mm', 'a4');
-      const pageW = pdf.internal.pageSize.getWidth();
-      const pageH = pdf.internal.pageSize.getHeight();
-      const imgW = pageW;
-      const imgH = (canvas.height * imgW) / canvas.width;
-
-      let heightLeft = imgH;
-      let position = 0;
-
-      pdf.addImage(imgData, 'PNG', 0, position, imgW, imgH);
-      heightLeft -= pageH;
-
-      while (heightLeft > 0) {
-        position -= pageH;
-        pdf.addPage();
-        pdf.addImage(imgData, 'PNG', 0, position, imgW, imgH);
-        heightLeft -= pageH;
-      }
-
-      pdf.save(`${section.title || 'selection'}.pdf`);
-    } catch (err) {
-      console.error('export error', err);
-      setErrorMsg('Could not export this section. Ensure every image/PDF is loaded via the proxy.');
-    }
-  }
-
-  // Search/import (adds a product)
+  // ---------- Search/import (adds a product) ----------
   const [q, setQ] = useState('');
   const [searching, setSearching] = useState(false);
   const [results, setResults] = useState<Array<{ title: string; url: string; image?: string }>>([]);
@@ -264,22 +248,30 @@ export default function SectionSlide({ section, onUpdate }: Props) {
   async function search() {
     const term = q.trim();
     if (!term) return;
-    setErrorMsg(null); setSearching(true); setResults([]);
+    setErrorMsg(null);
+    setSearching(true);
+    setResults([]);
+
     try {
-      const res = await fetch(`/api/search?q=${encodeURIComponent(term)}`, { headers: { Accept: 'application/json' }});
+      const res = await fetch(`/api/search?q=${encodeURIComponent(term)}`, { headers: { Accept: 'application/json' } });
       if (!res.ok) {
-        const txt = await res.text().catch(() => ''); throw new Error(`Search failed (${res.status}). ${txt.slice(0,200)}`);
+        const txt = await res.text().catch(() => '');
+        throw new Error(`Search failed (${res.status}). ${txt.slice(0, 200)}`);
       }
-      const data = await res.json().catch(() => ({}));
-      const list = Array.isArray(data) ? data :
-                   Array.isArray((data as any)?.results) ? (data as any).results :
-                   Array.isArray((data as any)?.items) ? (data as any).items :
-                   Array.isArray((data as any)?.data) ? (data as any).data : [];
-      const normalized = list.map((r: any) => ({
-        title: r.title ?? r.name ?? r.text ?? 'Untitled',
-        url: r.url ?? r.link ?? r.href ?? '',
-        image: r.image ?? r.thumbnail ?? r.img ?? undefined,
-      })).filter((r: any) => typeof r.url === 'string' && r.url.length > 0);
+      const data: any = await res.json().catch(() => ({}));
+      const list = Array.isArray(data)
+        ? data
+        : Array.isArray(data?.results) ? data.results
+        : Array.isArray(data?.items) ? data.items
+        : Array.isArray(data?.data) ? data.data
+        : [];
+      const normalized = list
+        .map((r: any) => ({
+          title: r.title ?? r.name ?? r.text ?? 'Untitled',
+          url: r.url ?? r.link ?? r.href ?? '',
+          image: r.image ?? r.thumbnail ?? r.img ?? undefined,
+        }))
+        .filter((r: any) => typeof r.url === 'string' && r.url.length > 0);
       setResults(normalized);
       if (normalized.length === 0) setErrorMsg('No results found for that query.');
     } catch (e: any) {
@@ -293,11 +285,12 @@ export default function SectionSlide({ section, onUpdate }: Props) {
   async function importUrl(u: string) {
     setErrorMsg(null);
     try {
-      const res = await fetch(`/api/scrape?url=${encodeURIComponent(u)}`, { headers: { Accept: 'application/json' }});
+      const res = await fetch(`/api/scrape?url=${encodeURIComponent(u)}`, { headers: { Accept: 'application/json' } });
       if (!res.ok) {
-        const txt = await res.text().catch(() => ''); throw new Error(`Import failed (${res.status}). ${txt.slice(0,200)}`);
+        const txt = await res.text().catch(() => '');
+        throw new Error(`Import failed (${res.status}). ${txt.slice(0, 200)}`);
       }
-      const data = await res.json().catch(() => ({} as any));
+      const data: any = await res.json().catch(() => ({}));
 
       const p: Product = {
         id: data.code || data.id || crypto.randomUUID(),
@@ -307,7 +300,7 @@ export default function SectionSlide({ section, onUpdate }: Props) {
         category: data.category ?? undefined,
         image: absUrl(data.image, u),
         gallery: Array.isArray(data.gallery)
-          ? data.gallery.map((g: string) => absUrl(g, u)).filter(Boolean) as string[]
+          ? (data.gallery as any[]).map((g) => absUrl(String(g), u)).filter(Boolean) as string[]
           : undefined,
         description: cleanText(data.description),
         features: Array.isArray(data.features) ? data.features : undefined,
@@ -316,21 +309,28 @@ export default function SectionSlide({ section, onUpdate }: Props) {
         tags: Array.isArray(data.tags) ? data.tags : undefined,
         sourceUrl: u,
         specPdfUrl: absUrl(data.specPdfUrl, u),
+        // Normalize to {url,label}
         assets: Array.isArray(data.assets)
-  ? (data.assets as any[])
-      .map((a) => {
-        // strings → { url }, objects → { url, label } (and absolutize)
-        if (typeof a === 'string') {
-          const uAbs = absUrl(a, u);
-          return uAbs ? { url: uAbs } : null;
-        }
-        const uAbs = absUrl(a?.url, u);
-        if (!uAbs) return null;
-        return { url: uAbs, label: typeof a?.label === 'string' ? a.label : undefined };
-      })
-      .filter(Boolean) as { url: string; label?: string }[]
-  : undefined,
+          ? (data.assets as any[])
+              .map((a: any) => {
+                if (typeof a === 'string') {
+                  const uAbs = absUrl(a, u);
+                  return uAbs ? { url: uAbs } : null;
+                }
+                const uAbs = absUrl(a && a.url, u);
+                if (!uAbs) return null;
+                const lbl = typeof a?.label === 'string' ? a.label : undefined;
+                return { url: uAbs, label: lbl };
+              })
+              .filter((x: any) => !!x)
+          : undefined,
+      };
 
+      const next = [...products, p];
+      onUpdate({ ...section, products: next, product: undefined });
+      setAdding(false);
+      setQ('');
+      setResults([]);
     } catch (e: any) {
       console.error('import error', e);
       setErrorMsg(e?.message || 'Failed to import product details.');
@@ -338,11 +338,10 @@ export default function SectionSlide({ section, onUpdate }: Props) {
   }
 
   function removeProduct(id: string) {
-    const next = (section.products ?? []).filter(p => p.id !== id);
+    const next = (section.products ?? []).filter((p) => p.id !== id);
     onUpdate({ ...section, products: next });
   }
 
-  // --------- RENDER ----------
   const hasAny = (section.products?.length ?? 0) > 0;
 
   return (
@@ -356,32 +355,27 @@ export default function SectionSlide({ section, onUpdate }: Props) {
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => setAdding(a => !a)}
+            onClick={() => setAdding((a) => !a)}
             className="rounded-lg border border-slate-300 text-slate-700 px-3 py-1.5 text-sm hover:bg-slate-50"
           >
             {adding ? 'Cancel' : (hasAny ? 'Add product' : 'Add first product')}
           </button>
-          {hasAny && (
-            <button
-              type="button"
-              onClick={exportThisSection}
-              className="rounded-lg bg-brand-600 text-white px-3 py-1.5 text-sm"
-            >
-              Export PDF
-            </button>
-          )}
         </div>
       </div>
 
-      {errorMsg && <div className="text-sm text-red-600" role="alert">{errorMsg}</div>}
+      {errorMsg && (
+        <div className="text-sm text-red-600" role="alert">
+          {errorMsg}
+        </div>
+      )}
 
       {/* Product list */}
-      <div ref={slideRef} className="space-y-6">
+      <div className="space-y-6">
         {(section.products ?? []).map((p) => (
           <ProductCard key={p.id} product={p} onRemove={() => removeProduct(p.id)} />
         ))}
 
-        {/* Search panel (only visible when adding OR when no products yet) */}
+        {/* Search panel (visible when adding OR when no products yet) */}
         {(adding || !hasAny) && (
           <div className="space-y-3">
             <div className="flex gap-2">
@@ -390,7 +384,9 @@ export default function SectionSlide({ section, onUpdate }: Props) {
                 onChange={(e) => setQ(e.target.value)}
                 placeholder="Search Precero products (e.g. 'la casa 2 in 1')"
                 className="flex-1 rounded-lg border px-3 py-2"
-                onKeyDown={(e) => { if (e.key === 'Enter') search(); }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') search();
+                }}
                 aria-label="Search products"
               />
               <button
