@@ -1,479 +1,252 @@
-// src/components/SectionSlide.tsx
-import React, { useEffect, useMemo, useState } from 'react';
-import type { Section, Product, Asset } from '../types';
-import { renderPdfFirstPageToDataUrl } from '../utils/pdfPreview';
+// netlify/functions/scrape.cjs
+// Scrapes a product page and returns clean product data.
+//
+// Requires: cheerio (add to package.json dependencies)
+// "dependencies": { "cheerio": "^1.0.0-rc.12", ... }
 
-type Props = { section: Section; onUpdate: (next: Section) => void };
+const cheerio = require('cheerio');
 
-/** Route external assets (images/PDFs) through the function to avoid CORS/tainted canvas */
-const viaProxy = (u?: string | null): string | undefined =>
-  u ? (/^https?:\/\//i.test(u) ? `/api/pdf-proxy?url=${encodeURIComponent(u)}` : u) : undefined;
+/* ---------------------- helpers ---------------------- */
 
-/** Resolve relative URLs (e.g. "/wp-content/...") against a base */
-function absUrl(u?: string | null, base?: string): string | undefined {
+function abs(u, base) {
   if (!u) return undefined;
   try {
-    return new URL(u, base || (typeof window !== 'undefined' ? window.location.href : undefined)).toString();
+    return new URL(u, base).toString();
   } catch {
-    return u || undefined;
+    return u;
   }
 }
 
-/** Strong cleaner for scraped text (no replaceAll) */
-function cleanText(input?: string | null, maxLen = 800): string | undefined {
-  if (!input) return undefined;
-  let s = String(input);
+function textClean(s) {
+  if (!s) return '';
+  return String(s)
+    .replace(/<\/?[^>]+>/g, ' ')           // strip tags
+    .replace(/\bhttps?:\/\/\S+/gi, ' ')    // strip naked URLs
+    .replace(/\S{120,}/g, ' ')             // nuke mega “words”
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
-  // Strip HTML tags that might have slipped in
-  s = s.replace(/<\/?[^>]+>/g, ' ');
+function uniq(arr) {
+  return Array.from(new Set(arr.filter(Boolean)));
+}
 
-  // If the blob contains “this is code”, cut before the first sentinel
-  const cutKeys = [
-    'window._wpemojiSettings',
-    '/*!',
-    '(function',
-    'function(',
-    'WorkerGlobalScope',
-    'createElement("canvas")',
-    'img:is(',
+/* ------------- PDF scoring (avoid “credit application”) ------------- */
+function scorePdfCandidate($, a, base) {
+  const $a = $(a);
+  const href = abs($a.attr('href'), base);
+  if (!href) return null;
+
+  const text = ($a.text() || '').toLowerCase();
+  const titleAttr = ($a.attr('title') || '').toLowerCase();
+  const fname = href.split('/').pop().toLowerCase();
+  const nearby = ($a.closest('li, p, div').text() || '').toLowerCase();
+
+  const label = `${text} ${titleAttr} ${fname} ${nearby}`;
+
+  // Strong positives (technical/spec/dimensions/install)
+  const POS = [
+    /spec/i,
+    /technical|tech/i,
+    /dimension|drawing|diagram|line[-\s]?drawing/i,
+    /install|instruction|guide|manual/i,
+    /data.?sheet|product.?sheet|info.?sheet/i,
+    /wels|size|cut.?out|template/i,
   ];
-  let cut = s.length;
-  for (const k of cutKeys) {
-    const i = s.indexOf(k);
-    if (i >= 0 && i < cut) cut = i;
-  }
-  if (cut < s.length) s = s.slice(0, cut);
 
-  // Remove script/style chunks (if present as text), URLs, and mega-“words”
-  s = s.replace(/<script[\s\S]*?<\/script>/gi, ' ');
-  s = s.replace(/<style[\s\S]*?<\/style>/gi, ' ');
-  s = s.replace(/\bhttps?:\/\/\S+/gi, ' ');
-  s = s.replace(/\S{120,}/g, ' ');
+  // Strong negatives (credit forms, policies, etc.)
+  const NEG = [
+    /credit|application|account/i,
+    /terms|policy|privacy|returns?/i,
+    /trade|form/i,
+  ];
 
-  // Normalize whitespace
-  s = s.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
+  let score = 0;
+  POS.forEach((re) => { if (re.test(label)) score += 5; });
+  NEG.forEach((re) => { if (re.test(label)) score -= 6; });
 
-  if (!s) return undefined;
-  if (s.length > maxLen) s = s.slice(0, maxLen).trimEnd() + '…';
-  return s;
+  // Light tie-breakers
+  try {
+    const hostOk = new URL(href).hostname === new URL(base).hostname;
+    if (hostOk) score += 1;
+  } catch {}
+  if (/uploads/i.test(href)) score += 1;
+
+  return { href, score };
 }
 
-// ---------- Search Result Card ----------
-function ResultCard({
-  r, onPick,
-}: { r: { title: string; url: string; image?: string }; onPick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onPick}
-      className="flex items-center gap-3 p-3 rounded-lg border w-full text-left hover:bg-slate-50"
-    >
-      <div className="w-12 h-12 bg-slate-200 rounded overflow-hidden flex items-center justify-center">
-        {r.image ? <img src={r.image} alt="" className="w-full h-full object-cover" /> : null}
-      </div>
-      <div className="text-sm leading-snug">
-        <div className="font-medium">{r.title}</div>
-        <div className="text-xs text-slate-500 break-all">{r.url}</div>
-      </div>
-    </button>
-  );
-}
+/* ---------------------- handler ---------------------- */
 
-// ---------- Editable Section Heading ----------
-function EditableHeading({ title, onChange }: { title: string; onChange: (t: string) => void }) {
-  const [editing, setEditing] = useState(false);
-  const [value, setValue] = useState(title);
-  useEffect(() => setValue(title), [title]);
-  function commit() {
-    const v = (value || '').trim() || 'Untitled Section';
-    onChange(v);
-    setEditing(false);
-  }
-  return (
-    <div className="flex items-center gap-2">
-      {editing ? (
-        <input
-          autoFocus
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          onBlur={commit}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') commit();
-            if (e.key === 'Escape') {
-              setValue(title);
-              setEditing(false);
-            }
-          }}
-          className="text-lg font-semibold text-gray-800 border rounded px-2 py-1 w-full max-w-md"
-          aria-label="Section title"
-        />
-      ) : (
-        <h2
-          className="text-lg font-semibold text-gray-800 cursor-text"
-          onDoubleClick={() => setEditing(true)}
-          title="Double-click to rename section"
-        >
-          {title}
-        </h2>
-      )}
-      {!editing && (
-        <button
-          type="button"
-          className="text-xs text-slate-600 hover:text-blue-600 underline"
-          onClick={() => setEditing(true)}
-        >
-          Edit
-        </button>
-      )}
-    </div>
-  );
-}
+exports.handler = async (event) => {
+  try {
+    const url = event.queryStringParameters && event.queryStringParameters.url;
+    if (!url) return { statusCode: 400, body: 'Missing ?url=' };
 
-// ---------- Product Card ----------
-function ProductCard({
-  product, onRemove,
-}: { product: Product; onRemove: () => void }) {
-  const [specImg, setSpecImg] = useState<string | null>(null);
+    const resp = await fetch(url, {
+      headers: {
+        'user-agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36',
+        accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      },
+      redirect: 'follow',
+    });
 
-  // Render first page of spec PDF (via proxy) as an image
-  useEffect(() => {
-    setSpecImg(null);
-    const src = absUrl(product.specPdfUrl, product.sourceUrl);
-    if (!src) return;
+    if (!resp.ok) {
+      return { statusCode: resp.status, body: `Failed to fetch page (${resp.status})` };
+    }
 
-    let cancelled = false;
-    (async () => {
-      try {
-        const png = await renderPdfFirstPageToDataUrl(viaProxy(src)!, 1000);
-        if (!cancelled) setSpecImg(png);
-      } catch (e) {
-        console.error('Failed to render PDF preview', e);
+    const html = await resp.text();
+    const $ = cheerio.load(html);
+    const base = url;
+
+    /* ----- title & sku ----- */
+    const titleRaw =
+      $('meta[property="og:title"]').attr('content') ||
+      $('h1.product_title, h1.entry-title, h1').first().text() ||
+      $('title').first().text() ||
+      '';
+
+    const title = textClean(titleRaw);
+
+    const sku =
+      $('.product_meta .sku').first().text().trim() ||
+      $(':contains("SKU")')
+        .filter('span,td,th,div')
+        .first()
+        .text()
+        .replace(/SKU[:\s]*/i, '')
+        .trim() ||
+      undefined;
+
+    /* ----- description (prefer Woo short desc / tab desc / meta desc) ----- */
+    const $short = $('.woocommerce-product-details__short-description').first();
+    const $tabDesc = $('.woocommerce-Tabs-panel--description, #tab-description').first();
+    const metaDesc = $('meta[name="description"]').attr('content');
+
+    const rawDesc =
+      ($short && $short.length ? $short.text() : '') ||
+      ($tabDesc && $tabDesc.length ? $tabDesc.text() : '') ||
+      metaDesc ||
+      '';
+
+    const description = textClean(rawDesc) || undefined;
+
+    /* ----- features (bullet lists under short/description) ----- */
+    const features = uniq(
+      []
+        .concat($short.find('li').map((i, el) => textClean($(el).text())).get())
+        .concat($tabDesc.find('li').map((i, el) => textClean($(el).text())).get())
+    );
+
+    /* ----- specs table (Woo attributes) + fallback “Specifications” table ----- */
+    let specs = $('.woocommerce-product-attributes tr')
+      .map((i, tr) => {
+        const label = textClean($(tr).find('th').text());
+        const value = textClean($(tr).find('td').text());
+        if (!label && !value) return null;
+        return { label, value };
+      })
+      .get();
+
+    if (!specs.length) {
+      // Fallback: any table following a heading that says "Specifications"
+      $('h2,h3,h4').each((i, h) => {
+        if (!/specifications?/i.test($(h).text())) return;
+        const $table = $(h).nextAll('table').first();
+        if (!$table.length) return;
+        const rows = $table
+          .find('tr')
+          .map((j, tr) => {
+            const tds = $(tr).find('th,td');
+            const label = textClean($(tds[0]).text());
+            const value = textClean($(tds[1]).text());
+            if (!label && !value) return null;
+            return { label, value };
+          })
+          .get();
+        if (rows.length) specs = rows;
+      });
+    }
+
+    /* ----- compliance (UL after a heading named “Compliance”) ----- */
+    let compliance = [];
+    $('h2,h3,h4').each((i, el) => {
+      if (/compliance/i.test($(el).text())) {
+        compliance = $(el)
+          .nextAll('ul').first()
+          .find('li')
+          .map((j, li) => textClean($(li).text()))
+          .get();
       }
-    })();
+    });
 
-    return () => {
-      cancelled = true;
+    /* ----- images (og:image → gallery → first image-like asset) ----- */
+    const ogImage = $('meta[property="og:image"]').attr('content');
+
+    const gallery = uniq(
+      $('figure.woocommerce-product-gallery__image img')
+        .map((i, img) => {
+          const $img = $(img);
+          return (
+            $img.attr('data-large_image') ||
+            $img.attr('data-src') ||
+            $img.attr('src')
+          );
+        })
+        .get()
+        .map((u) => abs(u, base))
+    );
+
+    // Links that look like images (fallback)
+    const assetImgs = uniq(
+      $('a[href]').map((i, a) => $(a).attr('href')).get()
+        .map((u) => abs(u, base))
+        .filter((u) => !!u && /\.(png|jpe?g|webp|gif|bmp)$/i.test(u))
+    );
+
+    const image =
+      abs(ogImage, base) ||
+      (gallery.length ? gallery[0] : undefined) ||
+      (assetImgs.length ? assetImgs[0] : undefined);
+
+    /* ----- PDFs: score to pick spec sheet, avoid credit application ----- */
+    const pdfCandidates = $('a[href$=".pdf"], a[href*=".pdf"]')
+      .map((i, a) => scorePdfCandidate($, a, base))
+      .get()
+      .filter(Boolean)
+      .sort((a, b) => b.score - a.score);
+
+    const pdfLinks = pdfCandidates.map((c) => c.href);
+    const specPdfUrl = pdfCandidates.length ? pdfCandidates[0].href : undefined;
+
+    /* ----- assets (normalize as {url,label}) ----- */
+    const assets = uniq(pdfLinks).map((u) => ({ url: u, label: 'PDF' }));
+
+    /* ----- output ----- */
+    const out = {
+      id: sku || title || url,
+      code: sku,
+      title,
+      name: title,
+      description,
+      features: features.length ? features : undefined,
+      specs: specs.length ? specs : undefined,
+      compliance: compliance.length ? compliance : undefined,
+      image,
+      gallery: gallery.length ? gallery : undefined,
+      specPdfUrl: specPdfUrl || undefined,
+      assets: assets.length ? assets : undefined,
+      sourceUrl: url,
     };
-  }, [product.specPdfUrl, product.sourceUrl]);
 
-  const imgAbs = absUrl(product.image, product.sourceUrl);
-  const imgProxied = viaProxy(imgAbs);
-
-  const hasTableLikeSpecs = useMemo(() => {
-    const s = product?.specs;
-    if (!Array.isArray(s) || s.length === 0) return false;
-    const first = s[0] as any;
-    return typeof first === 'object' && first && ('label' in first || 'value' in first);
-  }, [product?.specs]);
-
-  return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-white p-4 rounded-xl shadow-sm border">
-      <div>
-        {(imgProxied || imgAbs) && (
-          <img
-            src={imgProxied || imgAbs}
-            alt={product.name ?? 'Product image'}
-            className="w-full rounded-lg border"
-            crossOrigin="anonymous"
-            // If proxy fails, show original (display only) and mark to be ignored by html2canvas
-            onError={(e) => {
-              const el = e.currentTarget as HTMLImageElement;
-              if (!el.dataset.tryFallback && imgAbs && imgProxied) {
-                el.dataset.tryFallback = '1';
-                el.setAttribute('data-html2canvas-ignore', 'true');
-                el.src = imgAbs;
-              } else {
-                el.style.display = 'none';
-              }
-            }}
-          />
-        )}
-
-        {specImg && (
-          <img
-            src={specImg}
-            alt="Specifications preview"
-            className="w-full mt-4 rounded-lg border bg-white"
-          />
-        )}
-      </div>
-
-      <div className="prose max-w-none">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="m-0">{product.name ?? 'Selected product'}</h3>
-            {product.code && <p className="text-sm text-slate-500 m-0">{product.code}</p>}
-            {product.sourceUrl && (
-              <p className="m-0">
-                <a href={product.sourceUrl} target="_blank" rel="noreferrer" className="text-blue-600 break-all">
-                  {product.sourceUrl}
-                </a>
-              </p>
-            )}
-          </div>
-          <button
-            type="button"
-            onClick={onRemove}
-            className="rounded-lg border border-slate-300 text-slate-700 px-3 py-1.5 text-sm hover:bg-slate-50"
-            title="Remove this product from the section"
-          >
-            Remove
-          </button>
-        </div>
-
-        {cleanText(product.description) && <p>{cleanText(product.description)}</p>}
-
-        {!!product.compliance?.length && (
-          <>
-            <h4>Compliance</h4>
-            <ul>{product.compliance!.map((c: string, i: number) => (<li key={i}>{c}</li>))}</ul>
-          </>
-        )}
-
-        {!!product.features?.length && (
-          <>
-            <h4>Features</h4>
-            <ul>{product.features!.map((f: string, i: number) => (<li key={i}>{f}</li>))}</ul>
-          </>
-        )}
-
-        {!!product.specs?.length && (
-          <>
-            <h4>Specifications</h4>
-            {hasTableLikeSpecs ? (
-              <table className="w-full text-sm">
-                <tbody>
-                  {(product.specs as any[]).map((s: any, i: number) => (
-                    <tr key={i}>
-                      <td className="font-medium pr-3 align-top">{s.label ?? ''}</td>
-                      <td className="align-top">{s.value ?? ''}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : (
-              <ul>{(product.specs as any[]).map((s: any, i: number) => (<li key={i}>{String(s)}</li>))}</ul>
-            )}
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ---------- Main component ----------
-export default function SectionSlide({ section, onUpdate }: Props) {
-  const [adding, setAdding] = useState(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-
-  const products = section.products ?? [];
-
-  // One-time migration: legacy `product` -> `products[0]`
-  useEffect(() => {
-    if (section.product && (!section.products || section.products.length === 0)) {
-      onUpdate({ ...section, products: [section.product], product: undefined });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // ----- Search / Import -----
-  const [q, setQ] = useState('');
-  const [searching, setSearching] = useState(false);
-  const [results, setResults] = useState<Array<{ title: string; url: string; image?: string }>>([]);
-
-  async function search() {
-    const term = q.trim();
-    if (!term) return;
-    setErrorMsg(null);
-    setSearching(true);
-    setResults([]);
-
-    try {
-      const res = await fetch(`/api/search?q=${encodeURIComponent(term)}`, { headers: { Accept: 'application/json' } });
-      if (!res.ok) {
-        const txt = await res.text().catch(() => '');
-        throw new Error(`Search failed (${res.status}). ${txt.slice(0, 200)}`);
-      }
-      const data: any = await res.json().catch(() => ({}));
-      const list = Array.isArray(data)
-        ? data
-        : Array.isArray(data?.results) ? data.results
-        : Array.isArray(data?.items) ? data.items
-        : Array.isArray(data?.data) ? data.data
-        : [];
-      const normalized = list
-        .map((r: any) => ({
-          title: r.title ?? r.name ?? r.text ?? 'Untitled',
-          url: r.url ?? r.link ?? r.href ?? '',
-          image: r.image ?? r.thumbnail ?? r.img ?? undefined,
-        }))
-        .filter((r: any) => typeof r.url === 'string' && r.url.length > 0);
-      setResults(normalized);
-      if (normalized.length === 0) setErrorMsg('No results found for that query.');
-    } catch (e: any) {
-      console.error('search error', e);
-      setErrorMsg(e?.message || 'Search failed. Check the Netlify function logs.');
-    } finally {
-      setSearching(false);
-    }
+    return {
+      statusCode: 200,
+      headers: { 'content-type': 'application/json; charset=utf-8' },
+      body: JSON.stringify(out),
+    };
+  } catch (err) {
+    console.error(err);
+    return { statusCode: 500, body: 'Scrape error' };
   }
-
-  async function importUrl(u: string) {
-    setErrorMsg(null);
-    try {
-      const res = await fetch(`/api/scrape?url=${encodeURIComponent(u)}`, { headers: { Accept: 'application/json' } });
-      if (!res.ok) {
-        const txt = await res.text().catch(() => '');
-        throw new Error(`Import failed (${res.status}). ${txt.slice(0, 200)}`);
-      }
-      const data: any = await res.json().catch(() => ({}));
-
-      // Build gallery + assets
-      const galleryAbs = Array.isArray(data.gallery)
-        ? (data.gallery as any[]).map((g) => absUrl(String(g), u)).filter(Boolean) as string[]
-        : undefined;
-
-      const assetUrls = Array.isArray(data.assets)
-        ? (data.assets as any[])
-            .map((a: any) => (typeof a === 'string' ? absUrl(a, u) : absUrl(a?.url, u)))
-            .filter(Boolean) as string[]
-        : [];
-
-      // Select a primary image
-      const firstAssetImg = assetUrls.find((x) => /\.(png|jpe?g|webp|gif|bmp)$/i.test(x));
-      const primaryImage =
-        absUrl(data.image, u) ||
-        (galleryAbs && galleryAbs[0]) ||
-        firstAssetImg ||
-        undefined;
-
-      // Choose a short description
-      const rawDesc = data.shortDescription || data.summary || data.excerpt || data.description;
-      const cleaned = cleanText(rawDesc);
-      const featuresFallback = Array.isArray(data.features) ? cleanText(data.features.join('. ') + '.') : undefined;
-      const finalDescription = cleaned || featuresFallback || undefined;
-
-      const p: Product = {
-        id: data.code || data.id || crypto.randomUUID(),
-        code: data.code ?? undefined,
-        name: data.name || data.title || 'Imported Product',
-        brand: data.brand ?? undefined,
-        category: data.category ?? undefined,
-        image: primaryImage,
-        gallery: galleryAbs,
-        description: finalDescription,
-        features: Array.isArray(data.features) ? data.features : undefined,
-        specs: Array.isArray(data.specs) ? data.specs : undefined,
-        compliance: Array.isArray(data.compliance) ? data.compliance : undefined,
-        tags: Array.isArray(data.tags) ? data.tags : undefined,
-        sourceUrl: u,
-        specPdfUrl: absUrl(data.specPdfUrl, u),
-        // Normalize to Asset[]
-        assets: Array.isArray(data.assets)
-          ? (data.assets as any[])
-              .map((a: any) => {
-                if (typeof a === 'string') {
-                  const uAbs = absUrl(a, u);
-                  return uAbs ? { url: uAbs } : null;
-                }
-                const uAbs = absUrl(a?.url, u);
-                if (!uAbs) return null;
-                return { url: uAbs, label: typeof a?.label === 'string' ? a.label : undefined };
-              })
-              .filter((x: any): x is Asset => !!x)
-          : undefined,
-      };
-
-      const next = [...(section.products ?? []), p];
-      onUpdate({ ...section, products: next, product: undefined });
-      setAdding(false);
-      setQ('');
-      setResults([]);
-    } catch (e: any) {
-      console.error('import error', e);
-      setErrorMsg(e?.message || 'Failed to import product details.');
-    }
-  }
-
-  function removeProduct(id: string) {
-    const next = (section.products ?? []).filter((p) => p.id !== id);
-    onUpdate({ ...section, products: next });
-  }
-
-  const hasAny = (section.products?.length ?? 0) > 0;
-
-  return (
-    <div className="space-y-4">
-      {/* Header row */}
-      <div className="flex items-center justify-between">
-        <EditableHeading
-          title={section.title || 'Untitled Section'}
-          onChange={(t) => onUpdate({ ...section, title: t })}
-        />
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setAdding((a) => !a)}
-            className="rounded-lg border border-slate-300 text-slate-700 px-3 py-1.5 text-sm hover:bg-slate-50"
-          >
-            {adding ? 'Cancel' : (hasAny ? 'Add product' : 'Add first product')}
-          </button>
-        </div>
-      </div>
-
-      {errorMsg && (
-        <div className="text-sm text-red-600" role="alert">
-          {errorMsg}
-        </div>
-      )}
-
-      {/* Product list */}
-      <div className="space-y-6">
-        {(section.products ?? []).map((p) => (
-          <ProductCard key={p.id} product={p} onRemove={() => removeProduct(p.id)} />
-        ))}
-
-        {/* Search panel (visible when adding OR when no products yet) */}
-        {(adding || !hasAny) && (
-          <div className="space-y-3">
-            <div className="flex gap-2">
-              <input
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder="Search Precero products (e.g. 'la casa 2 in 1')"
-                className="flex-1 rounded-lg border px-3 py-2"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') search();
-                }}
-                aria-label="Search products"
-              />
-              <button
-                type="button"
-                onClick={search}
-                disabled={searching}
-                className="rounded-lg bg-brand-600 text-white px-3 py-2 text-sm disabled:opacity-60"
-                aria-busy={searching}
-              >
-                {searching ? 'Searching…' : 'Search'}
-              </button>
-            </div>
-
-            {results.length === 0 && !searching && (
-              <div className="text-sm text-slate-500">
-                Type a query and click Search to add a product to this section.
-              </div>
-            )}
-
-            {results.length > 0 && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {results.map((r, i) => (
-                  <ResultCard key={`${r.url}-${i}`} r={r} onPick={() => importUrl(r.url)} />
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
+};
