@@ -1,4 +1,4 @@
-import PptxGenJS from 'pptxgenjs';
+import PptxGenJS, { TableRow, TableCell } from 'pptxgenjs';
 import { renderPdfFirstPageToDataUrl } from '../utils/pdfPreview';
 import type { Section, Product, ClientInfo } from '../types';
 
@@ -166,14 +166,19 @@ export async function exportDeckPptx({ client, sections }: ExportArgs) {
 
     if (kv && kv.length) {
       // render as two-column table
-      const rows = kv.map((r) => [r.label || '', r.value || '']);
-      slide.addTable(rows, {
-        x: rightX, y: rightY, w: 2.6,
-        fontSize: 10,
-        colW: [1.0, 1.6],
-        border: { type: 'none' },
-        fill: 'FFFFFF',
-      });
+     const rows: TableRow[] = kv.map((r) => ([
+  { text: r.label || '' } as TableCell,
+  { text: r.value || '' } as TableCell,
+]));
+
+slide.addTable(rows, {
+  x: rightX, y: rightY, w: 2.6,
+  fontSize: 10,
+  colW: [1.0, 1.6],
+  // border/fill props vary by version; keeping styling minimal avoids type friction:
+  // If you still want no borders, uncomment next line and cast options to any.
+  // border: { type: 'none' } as any,
+});
       rightY += 0.24 + Math.min(3.5, kv.length * 0.24);
     } else if (bullets && bullets.length) {
       slide.addText(
