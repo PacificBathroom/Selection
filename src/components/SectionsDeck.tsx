@@ -2,7 +2,8 @@
 import React from 'react';
 import type { ClientInfo, Section } from '../types';
 import SectionSlide from './SectionSlide';
-import { exportDeckPdf } from '../utils/deckExporter';
+import { exportDeckPptx } from '../utils/pptExporter';
+
 
 type Props = {
   client: ClientInfo;
@@ -68,6 +69,15 @@ export default function SectionsDeck({ client, setClient, sections, setSections 
             onClick={addSection}
             className="rounded-lg border border-slate-300 text-slate-700 px-3 py-1.5 text-sm hover:bg-slate-50"
           >
+            <button
+  type="button"
+  onClick={() => exportDeckPptx({ client, sections })}
+  className="rounded-lg border border-slate-300 text-slate-700 px-3 py-1.5 text-sm hover:bg-slate-50"
+  title="Export to PowerPoint"
+>
+  Export PowerPoint (.pptx)
+</button>
+
             Add Section
           </button>
         </div>
