@@ -1,4 +1,6 @@
 // src/components/SectionSlide.tsx
+const fnUrl = (u?: string | null) =>
+  u ? `/.netlify/functions/pdf-proxy?url=${encodeURIComponent(u)}` : undefined;
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { Section, Product } from '../types';
 import { renderPdfFirstPageToDataUrl } from '../utils/pdfPreview';
