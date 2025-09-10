@@ -1,0 +1,45 @@
+/* src/print.css */
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 10mm;
+  }
+
+  html, body {
+    background: #fff !important;
+  }
+
+  /* Hide interactive controls on print */
+  .no-print,
+  button,
+  input[type="search"],
+  input[type="text"],
+  input[type="date"],
+  input[type="email"],
+  input[type="tel"],
+  [role="alert"] {
+    display: none !important;
+  }
+
+  /* Flatten cards */
+  .shadow,
+  .shadow-sm,
+  .shadow-md,
+  .shadow-lg,
+  .shadow-xl {
+    box-shadow: none !important;
+  }
+  .border {
+    border-color: #e5e7eb !important; /* slate-200-ish */
+  }
+
+  /* Avoid breaking product cards across pages */
+  .print-avoid-break {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
+
+  /* Tighten spacing a bit for print */
+  .prose h3 { margin-top: 0.2rem !important; }
+  .prose h4 { margin-top: 0.5rem !important; }
+}
