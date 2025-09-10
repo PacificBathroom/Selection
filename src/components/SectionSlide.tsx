@@ -19,21 +19,43 @@ function absUrl(u?: string | null, base?: string): string | undefined {
   }
 }
 
-/** Clean ugly scraped text (uses regex .replace, not .replaceAll) */
-function cleanText(input?: string | null, maxLen = 1200): string | undefined {
+/** Stronger cleaner for ugly scraped text (no replaceAll) */
+function cleanText(input?: string | null, maxLen = 800): string | undefined {
   if (!input) return undefined;
   let s = String(input);
-  s = s.replace(/window\._wpemojiSettings[\s\S]*?\};?/gi, ' ');
-  s = s.replace(/\/\*![\s\S]*?\*\//g, ' ');
+
+  // If the blob contains obvious "this is code" sentinels, cut before the first one
+  const cutKeys = [
+    'window._wpemojiSettings',
+    '/*!',           // big comment headers
+    '(function',     // IIFE
+    'function(',     // code
+    'WorkerGlobalScope',
+    'createElement("canvas")',
+  ];
+  let cut = s.length;
+  for (const k of cutKeys) {
+    const i = s.indexOf(k);
+    if (i >= 80 && i < cut) cut = i; // keep early descriptive text; ignore if sentinel is super early
+  }
+  if (cut < s.length) s = s.slice(0, cut);
+
+  // Strip script/style tags if they came through as text
   s = s.replace(/<script[\s\S]*?<\/script>/gi, ' ');
   s = s.replace(/<style[\s\S]*?<\/style>/gi, ' ');
+
+  // Remove very long "words" and bare URLs
+  s = s.replace(/\bhttps?:\/\/\S+/gi, ' ');
   s = s.replace(/\S{120,}/g, ' ');
-  s = s.replace(/\s+/g, ' ').trim();
+
+  // Normalize whitespace
+  s = s.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
+
   if (s.length > maxLen) s = s.slice(0, maxLen).trimEnd() + '…';
   return s || undefined;
 }
 
-// Small card for search results
+// Small card used in search results
 function ResultCard({
   r, onPick,
 }: { r: { title: string; url: string; image?: string }; onPick: () => void }) {
@@ -54,7 +76,7 @@ function ResultCard({
   );
 }
 
-/** Inline editable heading */
+/** Inline editable section heading */
 function EditableHeading({ title, onChange }: { title: string; onChange: (t: string) => void }) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(title);
@@ -110,6 +132,7 @@ function ProductCard({
 }: { product: Product; onRemove: () => void }) {
   const [specImg, setSpecImg] = useState<string | null>(null);
 
+  // Render first page of spec PDF (via proxy)
   useEffect(() => {
     setSpecImg(null);
     const src = absUrl(product.specPdfUrl, product.sourceUrl);
@@ -143,17 +166,27 @@ function ProductCard({
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-white p-4 rounded-xl shadow-sm border">
       <div>
-        {imgProxied && (
+        {(imgProxied || imgAbs) && (
           <img
-            src={imgProxied}
+            src={imgProxied || imgAbs}
             alt={product.name ?? 'Product image'}
             className="w-full rounded-lg border"
+            crossOrigin="anonymous"
+            // If proxy fails, fall back to original for display,
+            // but mark it to be ignored by html2canvas to keep export working.
             onError={(e) => {
-              // If proxy fails, hide (no raw fallback -> keeps canvas untainted)
-              (e.currentTarget as HTMLImageElement).style.display = 'none';
+              const el = e.currentTarget as HTMLImageElement;
+              if (!el.dataset.tryFallback && imgAbs && imgProxied) {
+                el.dataset.tryFallback = '1';
+                el.setAttribute('data-html2canvas-ignore', 'true');
+                el.src = imgAbs;
+              } else {
+                el.style.display = 'none';
+              }
             }}
           />
         )}
+
         {specImg && (
           <img
             src={specImg}
@@ -321,7 +354,7 @@ export default function SectionSlide({ section, onUpdate }: Props) {
                 if (!uAbs) return null;
                 return { url: uAbs, label: typeof a?.label === 'string' ? a.label : undefined };
               })
-              .filter((x: any): x is Asset => !!x) // type predicate removes nulls
+              .filter((x: any): x is Asset => !!x)
           : undefined,
       };
 
