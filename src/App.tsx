@@ -5,11 +5,8 @@ import FrontPage from './components/FrontPage';
 import { Section, ClientInfo } from './types';
 
 export default function App() {
-  const [sections, setSections] = useState<Section[]>([
-    { id: crypto.randomUUID(), title: 'Bathroom 1' },
-    { id: crypto.randomUUID(), title: 'Kitchen' },
-    { id: crypto.randomUUID(), title: 'Laundry' },
-  ]);
+const [sections, setSections] = useState<Section[]>([]);
+
 
   const [client, setClient] = useState<ClientInfo>({
     clientName: '',
