@@ -1,8 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { Section, Product } from '../types';
 import { renderPdfFirstPageToDataUrl } from '../utils/pdfPreview';
-import html2canvas from 'html2canvas';
-import jsPDF from 'jspdf';
+import { exportSectionAsPdf } from '../utils/exportSection';
 
 type Props = { section: Section; onUpdate: (next: Section) => void };
 
@@ -339,7 +338,6 @@ export default function SectionSlide({ section, onUpdate }: Props) {
   const hasAny = (section.products?.length ?? 0) > 0;
 
   // PDF export for the whole section view
-  const slideRef = useRef<HTMLDivElement>(null);
   async function exportSectionAsPdf() {
     if (!slideRef.current) return;
     const canvas = await html2canvas(slideRef.current, { scale: 2, useCORS: true, backgroundColor: '#ffffff' });
@@ -381,7 +379,7 @@ export default function SectionSlide({ section, onUpdate }: Props) {
 
       {errorMsg && <div className="text-sm text-red-600" role="alert">{errorMsg}</div>}
 
-      <div ref={slideRef} className="space-y-6">
+      <div className="space-y-6">
         {(section.products ?? []).map((p) => (
           <ProductCard key={p.id} product={p} onRemove={() => removeProduct(p.id)} />
         ))}
