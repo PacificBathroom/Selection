@@ -148,8 +148,8 @@ function ProductCard({ product, onRemove }: { product: Product; onRemove: () => 
 }
 
 export default function SectionSlide({ section, onUpdate }: Props) {
-  const products = section.products ?? [];
-  const [adding, setAdding] = useState(products.length === 0);
+  const products: Product[] = Array.isArray(section.products) ? section.products : [];
+const [adding, setAdding] = useState(products.length === 0);
   const [q, setQ] = useState('');
   const [searching, setSearching] = useState(false);
   const [results, setResults] = useState<Array<{ title: string; url: string; image?: string }>>([]);
@@ -207,7 +207,7 @@ export default function SectionSlide({ section, onUpdate }: Props) {
         specPdfUrl: absUrl(data.specPdfUrl, u),
         assets: undefined,
       };
-      onUpdate({ ...section, products: [...products, p] });
+      onUpdate({ ...section, products: products.filter((x) => x.id !== id) });
       setAdding(false);
       setQ(''); setResults([]);
     } catch (e: any) {
@@ -233,7 +233,7 @@ export default function SectionSlide({ section, onUpdate }: Props) {
         </button>
       </div>
 
-      {(section.products ?? []).map((p) => (
+     {products.map((p) => ( ... ))}
         <ProductCard key={p.id} product={p} onRemove={() => removeProduct(p.id)} />
       ))}
 
