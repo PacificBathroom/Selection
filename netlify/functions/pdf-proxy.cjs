@@ -1,4 +1,8 @@
-const ALLOW = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' };
+// netlify/functions/pdf-proxy.cjs
+const ALLOW = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': '*',
+};
 
 exports.handler = async (event) => {
   const url = event.queryStringParameters && event.queryStringParameters.url;
