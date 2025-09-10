@@ -1,4 +1,8 @@
-export type Asset = { label: string; url: string };
+// src/types.ts
+export type Asset = {
+  url: string;
+  label?: string;
+};
 
 export type Product = {
   id: string;
@@ -15,25 +19,20 @@ export type Product = {
   tags?: string[];
   sourceUrl?: string;
   specPdfUrl?: string;
-  assets?: string[];
-
-  // optional: all discovered PDFs/links
-  assets?: Asset[];
-};
-
-// src/types.ts
-export type ClientInfo = {
-  projectName: string;
-  clientName: string;
-  dateISO?: string;          // "YYYY-MM-DD"
-  contactName?: string;
-  contactEmail?: string;
-  contactPhone?: string;
+  assets?: Asset[]; // << unified here
 };
 
 export type Section = {
   id: string;
   title: string;
-  product?: Product;      // legacy (single)
-  products?: Product[];   // new (multiple)
+  // legacy single:
+  product?: Product;
+  // new multi:
+  products?: Product[];
+};
+
+export type ClientInfo = {
+  clientName: string;
+  projectName: string;
+  dateISO?: string;
 };
