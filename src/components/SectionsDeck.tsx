@@ -1,96 +1,63 @@
-import React, { useRef } from 'react';
-import type { Section, ClientInfo } from '../types';
+// src/components/SectionsDeck.tsx
+import React from 'react';
 import SectionSlide from './SectionSlide';
-import FrontPage from './FrontPage';
-import html2canvas from 'html2canvas';
-import jsPDF from 'jspdf';
+import type { ClientInfo, Section } from '../types';
 
 type Props = {
   client: ClientInfo;
   setClient: (c: ClientInfo) => void;
   sections: Section[];
-  setSections: React.Dispatch<React.SetStateAction<Section[]>>;
+  setSections: (s: Section[]) => void;
 };
 
 export default function SectionsDeck({ client, setClient, sections, setSections }: Props) {
-  const framesRef = useRef<Array<HTMLDivElement | null>>([]);
-  const frontRef = useRef<HTMLDivElement | null>(null);
-
-  async function exportDeckPdf() {
-    const pdf = new jsPDF('p', 'mm', 'a4');
-    let first = true;
-
-    // --- FRONT PAGE ---
-    if (frontRef.current) {
-      const canvas = await html2canvas(frontRef.current, {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: '#ffffff',
-      });
-      const img = canvas.toDataURL('image/png');
-      const pageW = pdf.internal.pageSize.getWidth();
-      const imgW = pageW;
-      const imgH = (canvas.height * imgW) / canvas.width;
-      pdf.addImage(img, 'PNG', 0, 0, imgW, imgH);
-      first = false;
-    }
-
-    // --- EACH SECTION ---
-    for (const node of framesRef.current) {
-      if (!node) continue;
-      const canvas = await html2canvas(node, {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: '#ffffff',
-      });
-      const img = canvas.toDataURL('image/png');
-      const pageW = pdf.internal.pageSize.getWidth();
-      const imgW = pageW;
-      const imgH = (canvas.height * imgW) / canvas.width;
-      if (!first) pdf.addPage();
-      pdf.addImage(img, 'PNG', 0, 0, imgW, imgH);
-      first = false;
-    }
-
-    pdf.save('selection-deck.pdf');
+  function addSection() {
+    const nextIndex = sections.length + 1;
+    const newSection: Section = {
+      id: crypto.randomUUID(),
+      title: `Section ${nextIndex}`,
+      // product: null, // include if your Section type has it
+    };
+    setSections([...sections, newSection]);
   }
 
-  function addSection() {
-    setSections((prev) => [
-      ...prev,
-      { id: crypto.randomUUID(), title: `Section ${prev.length + 1}`, product: undefined },
-    ]);
+  function updateSection(idx: number, next: Section) {
+    const copy = sections.slice();
+    copy[idx] = next;
+    setSections(copy);
+  }
+
+  function removeSection(idx: number) {
+    const copy = sections.slice();
+    copy.splice(idx, 1);
+    setSections(copy);
   }
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex justify-between items-center">
+        <div className="text-sm text-slate-500">
+          {sections.length} {sections.length === 1 ? 'section' : 'sections'}
+        </div>
         <button onClick={addSection} className="rounded-lg border px-3 py-1.5 text-sm hover:bg-slate-50">
           Add Section
         </button>
-        <button onClick={exportDeckPdf} className="rounded-lg bg-brand-600 text-white px-3 py-1.5 text-sm">
-          Export Deck (PDF)
-        </button>
       </div>
 
-      {/* --- FRONT PAGE --- */}
-      <div ref={frontRef}>
-        <FrontPage client={client} setClient={setClient} />
-      </div>
-
-      {/* --- PRODUCT SECTIONS --- */}
-      {sections.map((section, idx) => (
-        <div
-          key={section.id}
-          ref={(el) => (framesRef.current[idx] = el)}
-          className="bg-white p-4 rounded-xl"
-        >
+      {sections.map((section, i) => (
+        <div key={section.id} className="bg-white rounded-xl border shadow-sm p-4">
           <SectionSlide
             section={section}
-            onUpdate={(next) =>
-              setSections((prev) => prev.map((s) => (s.id === next.id ? next : s)))
-            }
+            onUpdate={(next) => updateSection(i, next)}
           />
+          <div className="mt-3 flex justify-end">
+            <button
+              onClick={() => removeSection(i)}
+              className="text-xs text-slate-500 hover:text-red-600"
+            >
+              Remove
+            </button>
+          </div>
         </div>
       ))}
     </div>
