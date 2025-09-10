@@ -1,19 +1,17 @@
 // src/utils/pptExporter.ts
-// Exports a PowerPoint deck: Cover + 1 slide per product (image left, details right)
-// Then you can "Save as PDF" from PowerPoint / macOS Preview.
+// Build a PowerPoint deck with a cover + one slide per product.
+// Then save as PDF from PowerPoint/Preview for a pixel-clean result.
 
 import type { ClientInfo, Section, Product } from '../types';
 
 const theme = {
   brand: { r: 31, g: 106, b: 238 }, // brand-600
-  gold:  { r: 197, g: 148, b: 21 }, // accent line
-  text:  { r: 0, g: 0, b: 0 },
-  sub:   { r: 90, g: 90, b: 90 },
+  gold: { r: 197, g: 148, b: 21 },
 };
 
-const SLIDE_W = 10;       // PowerPoint default: 10in x 5.625in (16:9)
+const SLIDE_W = 10;      // 16:9 (10 x 5.625")
 const SLIDE_H = 5.625;
-const M = 0.6;            // outer margin (inches)
+const M = 0.6;
 
 const viaProxy = (u?: string | null): string | undefined =>
   u ? (/^https?:\/\//i.test(u) ? `/api/pdf-proxy?url=${encodeURIComponent(u)}` : u) : undefined;
@@ -46,13 +44,10 @@ function normalizeSpecs(specs: unknown): KV[] {
   if (!specs) return [];
   if (Array.isArray(specs)) {
     const arr = specs as any[];
-    // case 1: [{label, value}]
     if (arr.every((x) => x && typeof x === 'object' && ('label' in x || 'value' in x))) {
-      return arr
-        .map((s) => ({ label: String(s.label ?? ''), value: String(s.value ?? '') }))
-        .filter((x) => x.label || x.value);
+      return arr.map((s) => ({ label: String(s.label ?? ''), value: String(s.value ?? '') }))
+                .filter((x) => x.label || x.value);
     }
-    // case 2: ["Label: Value", ...]
     if (arr.every((x) => typeof x === 'string')) {
       return (arr as string[]).map((line) => {
         const parts = String(line).split(':');
@@ -61,7 +56,6 @@ function normalizeSpecs(specs: unknown): KV[] {
       }).filter((x) => x.label || x.value);
     }
   }
-  // case 3: { key: value }
   if (specs && typeof specs === 'object') {
     return Object.entries(specs as Record<string, unknown>)
       .map(([k, v]) => ({ label: k, value: String(v ?? '') }))
@@ -95,65 +89,23 @@ async function measureImage(dataUrl?: string): Promise<{ w: number; h: number } 
   });
 }
 
-export async function exportDeckPptx({ client, sections }: { client: ClientInfo; sections: Section[] }) {
-  // dynamic import to avoid ESM type headaches
-  const PptxGenJS = (await import('pptxgenjs')).default;
-  const pptx = new PptxGenJS();
-  pptx.layout = 'LAYOUT_16x9'; // 10 x 5.625 inches
-
-  // ========== COVER ==========
-  {
-    const s = pptx.addSlide();
-    // top brand band
-    s.addShape(pptx.ShapeType.rect, {
-      x: 0, y: 0, w: SLIDE_W, h: 0.8,
-      fill: theme.brand,
-      line: { type: 'none' },
-    });
-
-    // logo (optional)
-    const logoData = await fetchDataUrl('/logo.png');
-    if (logoData) {
-      s.addImage({ data: logoData, x: M, y: 0.12, w: 1.8, h: 1.08 });
-    }
-
-    // Title
-    s.addText(client.projectName || 'Project Selection', {
-      x: M, y: 1.4, w: SLIDE_W - 2*M, h: 0.8,
-      fontFace: 'Helvetica', fontSize: 28, bold: true, color: '000000',
-    });
-
-    // gold divider
-    s.addShape(pptx.ShapeType.line, {
-      x: M, y: 2.25, w: SLIDE_W - 2*M, h: 0,
-      line: { color: theme.gold, width: 3 },
-    });
-
-    // Meta
-    const meta: string[] = [];
-    if (client.clientName) meta.push(`Prepared for ${client.clientName}`);
-    if (client.dateISO) meta.push(new Date(client.dateISO).toLocaleDateString());
-    s.addText(meta.join('\n'), {
-      x: M, y: 2.5, w: SLIDE_W - 2*M, h: 0.8,
-      fontFace: 'Helvetica', fontSize: 14, c// Replace the existing drawCover with this one
-async function drawCover(pdfx: any, client: ClientInfo, sections: Section[]) {
-  const pptx = pdfx; // same instance
+async function drawCover(pptx: any, client: ClientInfo, sections: Section[]) {
   const s = pptx.addSlide();
 
-  // Top brand band
+  // Brand band (top)
   s.addShape(pptx.ShapeType.rect, {
     x: 0, y: 0, w: SLIDE_W, h: 0.9,
     fill: theme.brand,
     line: { type: 'none' },
   });
 
-  // Logo on the right of the band (adjust width/height if needed)
+  // Logo on right of band
   const logoData = await fetchDataUrl('/logo.png');
   if (logoData) {
     s.addImage({ data: logoData, x: SLIDE_W - (M + 2.0), y: 0.12, w: 1.9, h: 1.14 });
   }
 
-  // Main title block (centered)
+  // Big centered title
   const title = client.projectName || 'Project Selection';
   s.addText(title, {
     x: M, y: 1.45, w: SLIDE_W - 2*M, h: 0.9,
@@ -161,7 +113,7 @@ async function drawCover(pdfx: any, client: ClientInfo, sections: Section[]) {
     align: 'center',
   });
 
-  // Thicker gold divider under title
+  // Thick gold divider
   s.addShape(pptx.ShapeType.line, {
     x: M + 0.6, y: 2.45, w: SLIDE_W - 2*(M + 0.6), h: 0,
     line: { color: theme.gold, width: 4 },
@@ -170,15 +122,14 @@ async function drawCover(pdfx: any, client: ClientInfo, sections: Section[]) {
   // Meta (centered)
   const meta: string[] = [];
   if (client.clientName) meta.push(`Prepared for ${client.clientName}`);
-  if (client.dateISO)   meta.push(new Date(client.dateISO).toLocaleDateString());
-
+  if (client.dateISO) meta.push(new Date(client.dateISO).toLocaleDateString());
   s.addText(meta.join('\n'), {
     x: M, y: 2.75, w: SLIDE_W - 2*M, h: 0.9,
     fontFace: 'Helvetica', fontSize: 14, color: '5A5A5A',
     align: 'center', valign: 'top',
   });
 
-  // Contact block (left aligned, lower on page)
+  // Contact (centered)
   const cBits = [
     client.contactName ? `Contact: ${client.contactName}` : '',
     client.contactEmail ? `Email: ${client.contactEmail}` : '',
@@ -192,17 +143,27 @@ async function drawCover(pdfx: any, client: ClientInfo, sections: Section[]) {
     });
   }
 
-  // Summary (bottom, centered)
+  // Summary (bottom)
   const totalProducts = sections.reduce((acc, sec) => acc + (sec.products?.length || 0), 0);
-  s.addText(`${sections.length} section${sections.length === 1 ? '' : 's'} • ${totalProducts} product${totalProducts === 1 ? '' : 's'}`, {
-    x: M, y: SLIDE_H - 0.9, w: SLIDE_W - 2*M, h: 0.4,
-    fontFace: 'Helvetica', fontSize: 12, bold: true, color: '000000',
-    align: 'center',
-  });
+  s.addText(
+    `${sections.length} section${sections.length === 1 ? '' : 's'} • ${totalProducts} product${totalProducts === 1 ? '' : 's'}`,
+    {
+      x: M, y: SLIDE_H - 0.9, w: SLIDE_W - 2*M, h: 0.4,
+      fontFace: 'Helvetica', fontSize: 12, bold: true, color: '000000',
+      align: 'center',
+    }
+  );
 }
 
+export async function exportDeckPptx({ client, sections }: { client: ClientInfo; sections: Section[] }) {
+  const PptxGenJS: any = (await import('pptxgenjs')).default;
+  const pptx: any = new PptxGenJS();
+  pptx.layout = 'LAYOUT_16x9';
 
-  // ========== PRODUCT SLIDES ==========
+  // COVER
+  await drawCover(pptx, client, sections);
+
+  // PRODUCT SLIDES
   for (const sec of sections) {
     const prods = sec.products || [];
     for (const p of prods) {
@@ -214,31 +175,22 @@ async function drawCover(pdfx: any, client: ClientInfo, sections: Section[]) {
         fontFace: 'Helvetica', fontSize: 12, bold: true, color: '000000',
       });
 
-      // left image area
+      // left image box
       const imgAbs = absUrl(p.image, p.sourceUrl);
       const imgSrc = viaProxy(imgAbs);
       const imgData = await fetchDataUrl(imgSrc);
       if (imgData) {
         const measured = await measureImage(imgData);
-        // max area for image:
         const boxW = (SLIDE_W / 2) - (M + 0.1);
         const boxH = SLIDE_H - (M + 0.6);
         let w = boxW, h = boxH;
         if (measured && measured.w && measured.h) {
           const ratio = measured.w / measured.h;
-          if (boxW / boxH > ratio) {
-            // fit to height
-            h = boxH;
-            w = h * ratio;
-          } else {
-            // fit to width
-            w = boxW;
-            h = w / ratio;
-          }
+          if (boxW / boxH > ratio) { h = boxH; w = h * ratio; }
+          else { w = boxW; h = w / ratio; }
         }
         slide.addImage({ data: imgData, x: M, y: M, w, h });
       } else {
-        // placeholder box if no image
         slide.addShape(pptx.ShapeType.rect, {
           x: M, y: M, w: (SLIDE_W / 2) - (M + 0.1), h: SLIDE_H - (M + 0.6),
           fill: { color: 'F2F2F2' }, line: { color: 'DDDDDD' },
@@ -249,18 +201,16 @@ async function drawCover(pdfx: any, client: ClientInfo, sections: Section[]) {
         });
       }
 
-      // right column start
+      // right column
       const RX = (SLIDE_W / 2) + 0.1;
       let y = M;
 
-      // product title
       slide.addText(p.name || 'Product', {
         x: RX, y, w: SLIDE_W - RX - M, h: 0.4,
         fontFace: 'Helvetica', fontSize: 18, bold: true, color: '000000',
       });
       y += 0.5;
 
-      // link + code
       if (p.sourceUrl) {
         slide.addText(p.sourceUrl, {
           x: RX, y, w: SLIDE_W - RX - M, h: 0.3,
@@ -276,7 +226,6 @@ async function drawCover(pdfx: any, client: ClientInfo, sections: Section[]) {
         y += 0.35;
       }
 
-      // description
       const desc = cleanText(p.description);
       if (desc) {
         slide.addText(desc, {
@@ -287,17 +236,13 @@ async function drawCover(pdfx: any, client: ClientInfo, sections: Section[]) {
         y += 1.25;
       }
 
-      // features (bullets)
       if (p.features?.length) {
         slide.addText('Features', {
           x: RX, y, w: SLIDE_W - RX - M, h: 0.3,
           fontFace: 'Helvetica', fontSize: 12, bold: true, color: '000000',
         });
         y += 0.35;
-
-        // show up to ~8 bullets to avoid overflow
-        const maxBullets = 8;
-        const items = p.features.slice(0, maxBullets).map((f) => `• ${f}`);
+        const items = p.features.slice(0, 8).map((f) => `• ${f}`);
         slide.addText(items, {
           x: RX, y, w: SLIDE_W - RX - M, h: 1.6,
           fontFace: 'Helvetica', fontSize: 11, color: '000000',
@@ -306,7 +251,6 @@ async function drawCover(pdfx: any, client: ClientInfo, sections: Section[]) {
         y += 1.7;
       }
 
-      // specifications
       const specs = normalizeSpecs(p.specs);
       if (specs.length) {
         slide.addText('Specifications', {
@@ -315,13 +259,8 @@ async function drawCover(pdfx: any, client: ClientInfo, sections: Section[]) {
         });
         y += 0.35;
 
-        // build a 2-col table: Label | Value
         const rows: (string | { text: string; options?: any })[][] = [];
-        // header row
-        rows.push([
-          { text: 'Label',  options: { bold: true } },
-          { text: 'Value',  options: { bold: true } },
-        ]);
+        rows.push([{ text: 'Label', options: { bold: true } }, { text: 'Value', options: { bold: true } }]);
         for (const kv of specs.slice(0, 18)) {
           rows.push([kv.label || '', kv.value || '']);
         }
@@ -334,24 +273,10 @@ async function drawCover(pdfx: any, client: ClientInfo, sections: Section[]) {
           fill: 'FFFFFF',
         });
       } else if (p.specPdfUrl) {
-        // fallback: just show a link to the spec PDF if we couldn't parse structured specs
-        slide.addText('Specifications:', {
+        slide.addText('Specifications', {
           x: RX, y, w: SLIDE_W - RX - M, h: 0.3,
           fontFace: 'Helvetica', fontSize: 12, bold: true, color: '000000',
         });
         y += 0.35;
         slide.addText(p.specPdfUrl, {
-          x: RX, y, w: SLIDE_W - RX - M, h: 0.3,
-          fontFace: 'Helvetica', fontSize: 10, color: '1F6AEE',
-        });
-      }
-    }
-  }
-
-  const fileName = `${(client.projectName || 'selection')
-    .replace(/[^a-z0-9]+/gi, '-')
-    .replace(/^-+|-+$/g, '')
-    .toLowerCase()}.pptx`;
-
-  await pptx.writeFile({ fileName });
-}
+          x: RX, y, w: SLIDE_W - RX - M,_
