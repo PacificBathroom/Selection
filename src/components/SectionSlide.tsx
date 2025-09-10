@@ -149,7 +149,7 @@ export default function SectionSlide({ section, onUpdate }: Props) {
     setSearching(true);
     setResults([]);
     try {
-      const res = await fetch(`/api/search?q=${encodeURIComponent(term)}`);
+      const res = await fetch(`/.netlify/functions/search?q=${encodeURIComponent(term)}`);
       const data = await res.json();
       const list = Array.isArray(data) ? data : Array.isArray(data?.results) ? data.results : [];
       setResults(list);
@@ -163,7 +163,7 @@ export default function SectionSlide({ section, onUpdate }: Props) {
 
   async function importUrl(u: string) {
     try {
-      const res = await fetch(`/api/scrape?url=${encodeURIComponent(u)}`);
+      const res = await fetch(`/.netlify/functions/scrape?url=${encodeURIComponent(u)}`);
       const data = await res.json();
 
       const p: Product = {
