@@ -1,4 +1,9 @@
 // src/components/SectionSlide.tsx
+// Types aren’t exported in this build; use default export and loose typing
+// @ts-ignore
+import PptxGenJS from 'pptxgenjs';
+type TableRow = any;
+type TableCell = any;
 import React, { useEffect, useMemo, useState } from 'react';
 import type { Section, Product } from '../types';
 import { renderPdfFirstPageToDataUrl } from '../utils/pdfPreview';
@@ -294,7 +299,8 @@ export default function SectionSlide({ section, onUpdate }: Props) {
     onUpdate({ ...section, products: next });
   }
 
-  const hasAny = products.length > 0;
+  const hasAny =
+  Array.isArray(section.products) ? section.products.length > 0 : !!section.product;
 
   return (
     <div className="space-y-4">
