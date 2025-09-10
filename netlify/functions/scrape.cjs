@@ -1,195 +1,303 @@
 // netlify/functions/scrape.cjs
+// Fetches a product page, extracts clean fields, normalises specs, and chooses the best spec PDF.
+// Returns JSON: { id, code, name, brand, category, image, gallery, description, features, specs, compliance, tags, sourceUrl, specPdfUrl, assets }
+
 const cheerio = require('cheerio');
 
-function abs(u, base) {
+/** absolute URL helper */
+function absUrl(u, base) {
   if (!u) return undefined;
-  try { return new URL(u, base).toString(); } catch { return u; }
+  try {
+    return new URL(u, base).toString();
+  } catch {
+    return u;
+  }
 }
-function textClean(s) {
-  if (!s) return '';
-  return String(s)
-    .replace(/<\/?[^>]+>/g, ' ')
-    .replace(/\bhttps?:\/\/\S+/gi, ' ')
-    .replace(/\S{120,}/g, ' ')
-    .replace(/[\r\n]+/g, ' ')
+
+/** clean text (no .replaceAll for older targets) */
+function cleanText(s, maxLen = 1600) {
+  if (!s) return undefined;
+  let t = String(s)
+    .replace(/window\._wpemojiSettings[\s\S]*?\};?/gi, ' ')
+    .replace(/\/\*![\s\S]*?\*\//g, ' ')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+  if (t.length > maxLen) t = t.slice(0, maxLen).trimEnd() + '…';
+  return t || undefined;
 }
-function uniq(arr) { return Array.from(new Set((arr || []).filter(Boolean))); }
 
-function scorePdfCandidate($, a, base) {
-  const $a = $(a);
-  const href = abs($a.attr('href'), base);
-  if (!href) return null;
-
-  const text = ($a.text() || '').toLowerCase();
-  const titleAttr = ($a.attr('title') || '').toLowerCase();
-  const fname = href.split('/').pop().toLowerCase();
-  const nearby = ($a.closest('li, p, div').text() || '').toLowerCase();
-  const label = `${text} ${titleAttr} ${fname} ${nearby}`;
-
-  const POS = [/spec/i, /technical|tech/i, /dimension|drawing|diagram|line[-\s]?drawing/i,
-               /install|instruction|guide|manual/i, /data.?sheet|product.?sheet|info.?sheet/i,
-               /wels|size|cut.?out|template/i];
-  const NEG = [/credit|application|account/i, /terms|policy|privacy|returns?/i, /trade|form/i];
-
+/** score candidate PDF links; prefer spec/datasheet/technical; avoid credit/application */
+function scorePdf(href, text) {
+  const s = `${href} ${text || ''}`.toLowerCase();
   let score = 0;
-  POS.forEach(re => { if (re.test(label)) score += 5; });
-  NEG.forEach(re => { if (re.test(label)) score -= 6; });
+  // positive signals
+  if (/\bspec/i.test(s)) score += 5;                 // spec/specification
+  if (/datasheet|technical|tech\s*sheet/i.test(s)) score += 4;
+  if (/install|installation/i.test(s)) score += 1;
+  if (/product\-sheet|cut\s*sheet/i.test(s)) score += 2;
+  // negative signals
+  if (/credit|application|returns|account/i.test(s)) score -= 10;
+  if (/warranty|privacy|terms/i.test(s)) score -= 2;
+  return score;
+}
 
-  try { if (new URL(href).hostname === new URL(base).hostname) score += 1; } catch {}
-  if (/uploads/i.test(href)) score += 1;
-  return { href, score };
+/** try to extract a two-column spec table: [{label,value}] */
+function extractSpecTable($, base) {
+  const out = [];
+
+  // WooCommerce attributes table
+  $('table.woocommerce-product-attributes, table.shop_attributes').each((i, tbl) => {
+    $(tbl)
+      .find('tr')
+      .each((j, tr) => {
+        const k = cleanText($(tr).find('th, .label').first().text());
+        const v = cleanText($(tr).find('td, .value').first().text());
+        if (k || v) out.push({ label: k || '', value: v || '' });
+      });
+  });
+  if (out.length) return out;
+
+  // Any table with th/td pairs
+  $('table').each((i, tbl) => {
+    const rows = [];
+    $(tbl)
+      .find('tr')
+      .each((j, tr) => {
+        const th = cleanText($(tr).find('th').first().text());
+        const td = cleanText($(tr).find('td').first().text());
+        if ((th || td) && (th || '').length < 64) rows.push({ label: th || '', value: td || '' });
+      });
+    if (rows.length >= 3) {
+      out.push(...rows);
+      return false; // take the first good-looking table
+    }
+  });
+
+  return out;
+}
+
+/** fallback: definition lists or bullet lists */
+function extractSpecList($) {
+  const out = [];
+
+  // <dl><dt>Label</dt><dd>Value</dd>
+  $('dl').each((i, dl) => {
+    const rows = [];
+    const $dl = $(dl);
+    const dts = $dl.find('dt');
+    const dds = $dl.find('dd');
+    if (dts.length && dds.length && dts.length === dds.length) {
+      dts.each((j, dt) => {
+        const k = cleanText($(dt).text());
+        const v = cleanText($(dds[j]).text());
+        if (k || v) rows.push({ label: k || '', value: v || '' });
+      });
+    }
+    if (rows.length >= 3) {
+      out.push(...rows);
+      return false;
+    }
+  });
+  if (out.length) return out;
+
+  // lists with "Label: Value"
+  const rows = [];
+  $('ul li, ol li').each((i, li) => {
+    const t = cleanText($(li).text());
+    if (!t) return;
+    const parts = t.split(':');
+    if (parts.length >= 2 && parts[0].length < 64) {
+      rows.push({ label: parts[0].trim(), value: parts.slice(1).join(':').trim() });
+    }
+  });
+  if (rows.length >= 3) return rows;
+
+  return [];
+}
+
+/** extract image + gallery */
+function extractImages($, base) {
+  const seen = new Set();
+  const gallery = [];
+
+  // Preferred: product gallery images
+  $('.woocommerce-product-gallery img, .product-gallery img, .gallery img, figure img, .product img').each((i, img) => {
+    const src =
+      $(img).attr('data-large_image') ||
+      $(img).attr('data-src') ||
+      $(img).attr('src') ||
+      $(img).attr('srcset')?.split(' ')[0];
+    const u = absUrl(src, base);
+    if (u && !seen.has(u)) {
+      seen.add(u);
+      gallery.push(u);
+    }
+  });
+
+  // og:image fallback
+  const og = absUrl($('meta[property="og:image"]').attr('content'), base);
+  if (og && !seen.has(og)) {
+    seen.add(og);
+    gallery.unshift(og);
+  }
+
+  return {
+    image: gallery[0],
+    gallery,
+  };
+}
+
+/** simple features extraction */
+function extractFeatures($) {
+  const out = [];
+  // obvious features containers
+  $('.features, .product-features, .key-features, .fa-check, .icon-check')
+    .closest('ul,ol')
+    .find('li')
+    .each((i, li) => {
+      const t = cleanText($(li).text());
+      if (t && t.length > 2) out.push(t);
+    });
+
+  if (out.length) return out;
+
+  // generic bullet lists near content
+  $('article ul, .summary ul, .entry-content ul, .product-summary ul').each((i, ul) => {
+    $(ul)
+      .find('li')
+      .each((j, li) => {
+        const t = cleanText($(li).text());
+        if (t && t.length > 2) out.push(t);
+      });
+    if (out.length >= 4) return false;
+  });
+
+  return out.slice(0, 12);
 }
 
 exports.handler = async (event) => {
   try {
-    const url = event.queryStringParameters && event.queryStringParameters.url;
-    if (!url) return { statusCode: 400, body: 'Missing ?url=' };
+    const url = (event.queryStringParameters && event.queryStringParameters.url) || '';
+    if (!url) {
+      return { statusCode: 400, body: JSON.stringify({ error: 'Missing url' }) };
+    }
 
-    const resp = await fetch(url, {
-      headers: {
-        'user-agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36',
-        accept:'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
-      },
-      redirect: 'follow'
-    });
-    if (!resp.ok) return { statusCode: resp.status, body: `Failed to fetch page (${resp.status})` };
-
-    const html = await resp.text();
+    const res = await fetch(url, { headers: { 'user-agent': 'Mozilla/5.0 ProductScraper' } });
+    if (!res.ok) {
+      return { statusCode: res.status, body: JSON.stringify({ error: `Failed to fetch page (${res.status})` }) };
+    }
+    const html = await res.text();
     const $ = cheerio.load(html);
-    const base = url;
 
-    /* title / sku */
-    const title = textClean(
-      $('meta[property="og:title"]').attr('content') ||
-      $('h1.product_title, h1.entry-title, h1').first().text() ||
-      $('title').first().text() || ''
-    );
-    const sku =
-      $('.product_meta .sku').first().text().trim() ||
-      $(':contains("SKU")').filter('span,td,th,div').first().text().replace(/SKU[:\s]*/i,'').trim() ||
+    const title =
+      cleanText($('h1').first().text()) ||
+      cleanText($('meta[property="og:title"]').attr('content')) ||
+      cleanText($('title').text());
+
+    // description/meta
+    const metaDesc = cleanText($('meta[name="description"]').attr('content'));
+    let description = metaDesc;
+    if (!description) {
+      description = cleanText($('.summary, .entry-content, .product-short-description, article').first().text(), 1200);
+    }
+
+    // SKU/code
+    const code =
+      cleanText($('[itemprop="sku"]').first().text()) ||
+      cleanText($('.sku').first().text()) ||
+      (/\bSKU[:\s]*([A-Z0-9\-\._]+)/i.exec(html) || [])[1];
+
+    // brand/category (best-effort)
+    const brand =
+      cleanText($('[itemprop="brand"]').first().text()) ||
+      cleanText($('meta[property="og:site_name"]').attr('content')) ||
+      undefined;
+    const category =
+      cleanText($('.posted_in a').first().text()) ||
+      cleanText($('meta[property="article:section"]').attr('content')) ||
       undefined;
 
-    /* description (prefer short/tab desc; keep marketing copy, not code) */
-    const $short = $('.woocommerce-product-details__short-description').first();
-    const $tabDesc = $('.woocommerce-Tabs-panel--description, #tab-description').first();
-    const metaDesc = $('meta[name="description"]').attr('content');
-    const description = textClean(
-      ($short.length ? $short.text() : '') ||
-      ($tabDesc.length ? $tabDesc.text() : '') ||
-      metaDesc || ''
-    ) || undefined;
+    const { image, gallery } = extractImages($, url);
+    const features = extractFeatures($);
 
-    /* features (any UL bullets inside short or description tab) */
-    const features = uniq(
-      []
-        .concat($short.find('li').map((i, el) => textClean($(el).text())).get())
-        .concat($tabDesc.find('li').map((i, el) => textClean($(el).text())).get())
-    );
-
-    /* specs: 1) Woo attribute table 2) fallback tables 3) SPECIFICATIONS block "Label: Value" lines */
-    let specs = $('.woocommerce-product-attributes tr')
-      .map((i, tr) => {
-        const label = textClean($(tr).find('th').text());
-        const value = textClean($(tr).find('td').text());
-        if (!label && !value) return null;
-        return { label, value };
-      })
-      .get();
-
-    if (!specs.length) {
-      $('h2,h3,h4').each((i, h) => {
-        if (!/specifications?/i.test($(h).text())) return;
-        const $table = $(h).nextAll('table').first();
-        if ($table.length) {
-          const rows = $table.find('tr').map((j, tr) => {
-            const tds = $(tr).find('th,td');
-            const label = textClean($(tds[0]).text());
-            const value = textClean($(tds[1]).text());
-            if (!label && !value) return null;
-            return { label, value };
-          }).get();
-          if (rows.length) specs = rows;
-        }
-      });
-    }
-
-    // 3) SPECIFICATIONS block with paragraphs / lines like "Colour: Polished Chrome, ..."
-    if (!specs.length) {
-      $('h2,h3,h4').each((i, h) => {
-        if (!/specifications?/i.test($(h).text())) return;
-        const $block = $(h).nextUntil('h2,h3,h4'); // capture until next header
-        const pairs = [];
-        $block.each((j, el) => {
-          const txt = textClean($(el).text());
-          if (!txt) return;
-          // split by newlines / dots as last resort
-          const chunks = txt.split(/[\n•]+/g).map(s => s.trim()).filter(Boolean);
-          chunks.forEach(line => {
-            const m = line.match(/^([^:]+):\s*(.+)$/); // Label: Value
-            if (m) {
-              pairs.push({ label: textClean(m[1]), value: textClean(m[2]) });
-            }
-          });
-        });
-        if (pairs.length) { specs = pairs; return false; }
-      });
-    }
-
-    /* compliance under a "Compliance" heading (UL bullets) */
-    let compliance = [];
-    $('h2,h3,h4').each((i, el) => {
-      if (/compliance/i.test($(el).text())) {
-        compliance = $(el).nextAll('ul').first().find('li')
-          .map((j, li) => textClean($(li).text())).get();
+    // COMPLIANCE (simple pass — often listed in bullets)
+    const compliance = [];
+    $('*').each((i, el) => {
+      const t = cleanText($(el).text());
+      if (!t) return;
+      if (/code|standard|wels|as\/nz/i.test(t) && t.length < 120) {
+        compliance.push(t);
       }
     });
 
-    /* image(s) */
-    const ogImage = $('meta[property="og:image"]').attr('content');
-    const gallery = uniq(
-      $('figure.woocommerce-product-gallery__image img')
-        .map((i, img) => {
-          const $img = $(img);
-          return $img.attr('data-large_image') || $img.attr('data-src') || $img.attr('src');
-        })
-        .get()
-        .map(u => abs(u, base))
-    );
-    const assetImgs = uniq(
-      $('a[href]').map((i, a) => $(a).attr('href')).get()
-        .map(u => abs(u, base))
-        .filter(u => !!u && /\.(png|jpe?g|webp|gif|bmp)$/i.test(u))
-    );
-    const image = abs(ogImage, base) || (gallery[0]) || (assetImgs[0]);
+    // SPECS
+    let specs = extractSpecTable($, url);
+    if (!specs.length) specs = extractSpecList($);
 
-    /* PDFs */
-    const pdfCandidates = $('a[href$=".pdf"], a[href*=".pdf"]')
-      .map((i, a) => scorePdfCandidate($, a, base)).get()
-      .filter(Boolean).sort((a,b) => b.score - a.score);
-    const specPdfUrl = pdfCandidates.length ? pdfCandidates[0].href : undefined;
-    const assets = uniq(pdfCandidates.map(c => c.href)).map(u => ({ url: u, label: 'PDF' }));
+    // ALL PDF LINKS (for assets + picking specPdfUrl)
+    const pdfAnchors = [];
+    $('a[href$=".pdf"], a[href*=".pdf?"]').each((i, a) => {
+      const href = $(a).attr('href');
+      const label = cleanText($(a).text());
+      const u = absUrl(href, url);
+      if (u) pdfAnchors.push({ url: u, label });
+    });
 
-    const out = {
-      id: sku || title || url,
-      code: sku,
-      title,
-      name: title,
-      description,
-      features: features.length ? features : undefined,
-      specs: specs.length ? specs : undefined,
-      compliance: compliance.length ? compliance : undefined,
-      image,
-      gallery: gallery.length ? gallery : undefined,
+    // Choose the best spec PDF
+    let specPdfUrl;
+    if (pdfAnchors.length) {
+      let best = null;
+      let bestScore = -1e9;
+      for (const a of pdfAnchors) {
+        const sc = scorePdf(a.url, a.label);
+        if (sc > bestScore) {
+          best = a;
+          bestScore = sc;
+        }
+      }
+      if (bestScore >= 0) specPdfUrl = best.url; // only keep if non-negative score
+    }
+
+    // Generic assets (pdfs/images)
+    const assets = [];
+    for (const a of pdfAnchors) {
+      assets.push({ url: a.url, label: a.label || 'PDF' });
+    }
+    // include gallery images as assets too
+    for (const g of gallery || []) {
+      assets.push({ url: g });
+    }
+
+    const data = {
+      id: code || title || url,
+      code: code || undefined,
+      name: title || 'Imported Product',
+      brand: brand || undefined,
+      category: category || undefined,
+      image: image || undefined,
+      gallery: gallery && gallery.length ? gallery : undefined,
+      description: description || undefined,
+      features: features && features.length ? features : undefined,
+      specs: specs && specs.length ? specs : undefined, // array of {label,value}
+      compliance: compliance && compliance.length ? Array.from(new Set(compliance)).slice(0, 12) : undefined,
+      tags: undefined,
+      sourceUrl: url,
       specPdfUrl: specPdfUrl || undefined,
       assets: assets.length ? assets : undefined,
-      sourceUrl: url,
     };
 
-    return { statusCode: 200, headers: { 'content-type': 'application/json; charset=utf-8' }, body: JSON.stringify(out) };
+    return {
+      statusCode: 200,
+      headers: {
+        'content-type': 'application/json',
+        'access-control-allow-origin': '*',
+      },
+      body: JSON.stringify(data),
+    };
   } catch (err) {
     console.error(err);
-    return { statusCode: 500, body: 'Scrape error' };
+    return { statusCode: 500, body: JSON.stringify({ error: 'Scrape failed' }) };
   }
 };
