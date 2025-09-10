@@ -1,23 +1,24 @@
-exports.handler = async (event) => {
-  try {
-    const url = event.queryStringParameters?.url;
-    if (!url) return { statusCode: 400, body: 'Missing ?url=' };
+const ALLOW = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' };
 
+exports.handler = async (event) => {
+  const url = event.queryStringParameters && event.queryStringParameters.url;
+  if (!url) return { statusCode: 400, headers: ALLOW, body: 'Missing url' };
+
+  try {
     const res = await fetch(url);
-    if (!res.ok) return { statusCode: res.status, body: `Upstream ${res.status}` };
     const buf = Buffer.from(await res.arrayBuffer());
 
     return {
-      statusCode: 200,
+      statusCode: res.status,
       headers: {
-        'Content-Type': 'application/pdf',
+        ...ALLOW,
+        'Content-Type': res.headers.get('content-type') || 'application/octet-stream',
         'Cache-Control': 'public, max-age=3600',
-        'Access-Control-Allow-Origin': '*',
       },
       body: buf.toString('base64'),
       isBase64Encoded: true,
     };
   } catch (e) {
-    return { statusCode: 500, body: String(e?.message || e) };
+    return { statusCode: 502, headers: ALLOW, body: `Fetch failed: ${String(e)}` };
   }
 };
