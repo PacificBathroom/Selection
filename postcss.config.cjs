@@ -1,4 +1,4 @@
-// CommonJS so it works regardless of "type" in package.json
+// postcss.config.cjs
 module.exports = {
   plugins: {
     tailwindcss: {},
