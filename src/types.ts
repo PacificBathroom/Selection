@@ -19,20 +19,23 @@ export type Product = {
   tags?: string[];
   sourceUrl?: string;
   specPdfUrl?: string;
-  assets?: Asset[]; // << unified here
+  assets?: Asset[]; // unified type
 };
 
 export type Section = {
   id: string;
   title: string;
-  // legacy single:
-  product?: Product;
-  // new multi:
-  products?: Product[];
+  product?: Product;      // legacy single
+  products?: Product[];   // new multiple
 };
 
 export type ClientInfo = {
   clientName: string;
   projectName: string;
   dateISO?: string;
+
+  // These are used by FrontPage.tsx:
+  contactName?: string;
+  contactEmail?: string;
+  contactPhone?: string;
 };
