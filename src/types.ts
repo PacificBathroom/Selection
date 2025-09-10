@@ -2,21 +2,20 @@ export type Asset = { label: string; url: string };
 
 export type Product = {
   id: string;
-  name: string;
   code?: string;
-  description?: string;
-  image?: string;
-  gallery?: string[];
-  features?: string[];
-  specs?: { label: string; value: string }[];
-  compliance?: string[];
-  tags?: string[];
+  name?: string;
   brand?: string;
   category?: string;
+  image?: string;
+  gallery?: string[];
+  description?: string;
+  features?: string[];
+  specs?: any[];
+  compliance?: string[];
+  tags?: string[];
   sourceUrl?: string;
-
-  // NEW: picked by the scraper (best PDF that looks like a spec/data sheet)
   specPdfUrl?: string;
+  assets?: string[];
 
   // optional: all discovered PDFs/links
   assets?: Asset[];
@@ -35,5 +34,6 @@ export type ClientInfo = {
 export type Section = {
   id: string;
   title: string;
-  product?: any; // keep your existing shape if you had one
+  product?: Product;      // legacy (single)
+  products?: Product[];   // new (multiple)
 };
