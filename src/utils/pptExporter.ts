@@ -135,30 +135,72 @@ export async function exportDeckPptx({ client, sections }: { client: ClientInfo;
     if (client.dateISO) meta.push(new Date(client.dateISO).toLocaleDateString());
     s.addText(meta.join('\n'), {
       x: M, y: 2.5, w: SLIDE_W - 2*M, h: 0.8,
-      fontFace: 'Helvetica', fontSize: 14, color: '5A5A5A',
-      valign: 'top',
-    });
+      fontFace: 'Helvetica', fontSize: 14, c// Replace the existing drawCover with this one
+async function drawCover(pdfx: any, client: ClientInfo, sections: Section[]) {
+  const pptx = pdfx; // same instance
+  const s = pptx.addSlide();
 
-    // Contact block
-    const cBits = [
-      client.contactName ? `Contact: ${client.contactName}` : '',
-      client.contactEmail ? `Email: ${client.contactEmail}` : '',
-      client.contactPhone ? `Phone: ${client.contactPhone}` : '',
-    ].filter(Boolean);
-    if (cBits.length) {
-      s.addText(cBits.join('\n'), {
-        x: M, y: 3.1, w: 4.8, h: 1,
-        fontFace: 'Helvetica', fontSize: 12, color: '5A5A5A',
-      });
-    }
+  // Top brand band
+  s.addShape(pptx.ShapeType.rect, {
+    x: 0, y: 0, w: SLIDE_W, h: 0.9,
+    fill: theme.brand,
+    line: { type: 'none' },
+  });
 
-    // Summary
-    const totalProducts = sections.reduce((acc, sec) => acc + (sec.products?.length || 0), 0);
-    s.addText(`${sections.length} section${sections.length === 1 ? '' : 's'} • ${totalProducts} product${totalProducts === 1 ? '' : 's'}`, {
-      x: M, y: 4.3, w: SLIDE_W - 2*M, h: 0.4,
-      fontFace: 'Helvetica', fontSize: 12, bold: true, color: '000000',
+  // Logo on the right of the band (adjust width/height if needed)
+  const logoData = await fetchDataUrl('/logo.png');
+  if (logoData) {
+    s.addImage({ data: logoData, x: SLIDE_W - (M + 2.0), y: 0.12, w: 1.9, h: 1.14 });
+  }
+
+  // Main title block (centered)
+  const title = client.projectName || 'Project Selection';
+  s.addText(title, {
+    x: M, y: 1.45, w: SLIDE_W - 2*M, h: 0.9,
+    fontFace: 'Helvetica', fontSize: 30, bold: true, color: '000000',
+    align: 'center',
+  });
+
+  // Thicker gold divider under title
+  s.addShape(pptx.ShapeType.line, {
+    x: M + 0.6, y: 2.45, w: SLIDE_W - 2*(M + 0.6), h: 0,
+    line: { color: theme.gold, width: 4 },
+  });
+
+  // Meta (centered)
+  const meta: string[] = [];
+  if (client.clientName) meta.push(`Prepared for ${client.clientName}`);
+  if (client.dateISO)   meta.push(new Date(client.dateISO).toLocaleDateString());
+
+  s.addText(meta.join('\n'), {
+    x: M, y: 2.75, w: SLIDE_W - 2*M, h: 0.9,
+    fontFace: 'Helvetica', fontSize: 14, color: '5A5A5A',
+    align: 'center', valign: 'top',
+  });
+
+  // Contact block (left aligned, lower on page)
+  const cBits = [
+    client.contactName ? `Contact: ${client.contactName}` : '',
+    client.contactEmail ? `Email: ${client.contactEmail}` : '',
+    client.contactPhone ? `Phone: ${client.contactPhone}` : '',
+  ].filter(Boolean);
+  if (cBits.length) {
+    s.addText(cBits.join('\n'), {
+      x: M, y: 3.6, w: SLIDE_W - 2*M, h: 1,
+      fontFace: 'Helvetica', fontSize: 12, color: '5A5A5A',
+      align: 'center',
     });
   }
+
+  // Summary (bottom, centered)
+  const totalProducts = sections.reduce((acc, sec) => acc + (sec.products?.length || 0), 0);
+  s.addText(`${sections.length} section${sections.length === 1 ? '' : 's'} • ${totalProducts} product${totalProducts === 1 ? '' : 's'}`, {
+    x: M, y: SLIDE_H - 0.9, w: SLIDE_W - 2*M, h: 0.4,
+    fontFace: 'Helvetica', fontSize: 12, bold: true, color: '000000',
+    align: 'center',
+  });
+}
+
 
   // ========== PRODUCT SLIDES ==========
   for (const sec of sections) {
