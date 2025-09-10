@@ -1,101 +1,197 @@
-import React, { useRef } from 'react';
-import type { Product } from '../types';
-import html2canvas from 'html2canvas';
-import jsPDF from 'jspdf';
+// src/components/ProductDrawer.tsx
+import React, { useMemo, useState } from 'react';
+import type { Section, Product, Asset } from '../types';
+
+/** Resolve relative URLs (e.g. "/wp-content/...") against a base */
+function absUrl(u?: string | null, base?: string): string | undefined {
+  if (!u) return undefined;
+  try {
+    return new URL(u, base || (typeof window !== 'undefined' ? window.location.href : undefined)).toString();
+  } catch {
+    return u || undefined;
+  }
+}
+
+/** Clean text from scraper noise (safe for older TS targets) */
+function cleanText(input?: string | null, maxLen = 1200): string | undefined {
+  if (!input) return undefined;
+  let s = String(input);
+  s = s.replace(/window\._wpemojiSettings[\s\S]*?\};?/gi, ' ');
+  s = s.replace(/\/\*![\s\S]*?\*\//g, ' ');
+  s = s.replace(/<script[\s\S]*?<\/script>/gi, ' ');
+  s = s.replace(/<style[\s\S]*?<\/style>/gi, ' ');
+  s = s.replace(/\S{160,}/g, ' ');
+  s = s.replace(/\s+/g, ' ').trim();
+  if (s.length > maxLen) s = s.slice(0, maxLen).trimEnd() + '…';
+  return s || undefined;
+}
 
 type Props = {
-  product?: Product | null;
+  open: boolean;
   onClose: () => void;
+  section: Section;
+  onUpdate: (next: Section) => void;
 };
 
-export default function ProductDrawer({ product, onClose }: Props) {
-  // Hard guard so TS narrows `product` below
-  if (!product) return null;
-  const p: Product = product;
+export default function ProductDrawer({ open, onClose, section, onUpdate }: Props) {
+  const products: Product[] = useMemo(() => section.products ?? [], [section.products]);
 
-  const slideRef = useRef<HTMLDivElement>(null);
+  // --- Add by URL (uses your Netlify function /api/scrape) ---
+  const [addUrl, setAddUrl] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  async function exportPDF() {
-    const node = slideRef.current;
-    if (!node) return;
-    const canvas = await html2canvas(node, { scale: 2, useCORS: true, backgroundColor: '#ffffff' });
-    const img = canvas.toDataURL('image/png');
-    const pdf = new jsPDF('p', 'mm', 'a4');
-    const pageW = pdf.internal.pageSize.getWidth();
-    const imgW = pageW;
-    const imgH = (canvas.height * imgW) / canvas.width;
-    pdf.addImage(img, 'PNG', 0, 0, imgW, imgH);
-    pdf.save(`${p.code || p.name || 'product'}.pdf`);
+  async function addFromUrl() {
+    const u = addUrl.trim();
+    if (!u) return;
+    setBusy(true);
+    setErrorMsg(null);
+    try {
+      const res = await fetch(`/api/scrape?url=${encodeURIComponent(u)}`, {
+        headers: { Accept: 'application/json' },
+      });
+      if (!res.ok) {
+        const txt = await res.text().catch(() => '');
+        throw new Error(`Import failed (${res.status}). ${txt.slice(0, 200)}`);
+      }
+      const data: any = await res.json().catch(() => ({}));
+
+      const p: Product = {
+        id: data.code || data.id || crypto.randomUUID(),
+        code: data.code ?? undefined,
+        name: data.name || data.title || 'Imported Product',
+        brand: data.brand ?? undefined,
+        category: data.category ?? undefined,
+        image: absUrl(data.image, u),
+        gallery: Array.isArray(data.gallery)
+          ? (data.gallery as any[]).map((g) => absUrl(String(g), u)).filter(Boolean) as string[]
+          : undefined,
+        description: cleanText(data.description),
+        features: Array.isArray(data.features) ? data.features : undefined,
+        specs: Array.isArray(data.specs) || (data && typeof data.specs === 'object') ? data.specs : undefined,
+        compliance: Array.isArray(data.compliance) ? data.compliance : undefined,
+        tags: Array.isArray(data.tags) ? data.tags : undefined,
+        sourceUrl: u,
+        specPdfUrl: absUrl(data.specPdfUrl, u),
+        assets: Array.isArray(data.assets)
+          ? (data.assets as any[])
+              .map((a: any) => {
+                if (typeof a === 'string') {
+                  const uAbs = absUrl(a, u);
+                  return uAbs ? ({ url: uAbs } as Asset) : null;
+                }
+                const uAbs = absUrl(a?.url, u);
+                if (!uAbs) return null;
+                return { url: uAbs, label: typeof a?.label === 'string' ? a.label : undefined } as Asset;
+              })
+              .filter(Boolean) as Asset[]
+          : undefined,
+      };
+
+      onUpdate({ ...section, products: [...products, p], product: undefined });
+      setAddUrl('');
+    } catch (e: any) {
+      setErrorMsg(e?.message || 'Failed to import product details.');
+      console.error(e);
+    } finally {
+      setBusy(false);
+    }
   }
 
+  function removeProduct(id: string) {
+    const next = (section.products ?? []).filter((p) => p.id !== id);
+    onUpdate({ ...section, products: next });
+  }
+
+  // Drawer hidden
+  if (!open) return null;
+
   return (
-    <div className="fixed inset-0 z-50">
-      <button className="absolute inset-0 bg-black/40" onClick={onClose} aria-label="Close" />
-      <div className="absolute right-0 top-0 h-full w-full max-w-2xl bg-white shadow-xl overflow-y-auto">
-        <div className="p-6 border-b flex items-start justify-between">
-          <div>
-            <h2 className="text-2xl font-semibold leading-tight">{p.name}</h2>
-            {p.code && <p className="text-sm text-slate-500">{p.code}</p>}
-          </div>
+    <div className="fixed inset-0 z-40">
+      {/* Backdrop */}
+      <div className="absolute inset-0 bg-black/30" onClick={onClose} />
+
+      {/* Panel */}
+      <div className="absolute right-0 top-0 h-full w-full max-w-lg bg-white shadow-xl p-4 overflow-y-auto">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-lg font-semibold m-0">Manage Products</h3>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded border px-2 py-1 text-sm"
+          >
+            Close
+          </button>
+        </div>
+
+        {/* Add by URL */}
+        <div className="bg-slate-50 border rounded-lg p-3 space-y-2 mb-4">
+          <label className="text-sm block">
+            <span className="block text-slate-600 mb-1">Import product from URL</span>
+            <input
+              value={addUrl}
+              onChange={(e) => setAddUrl(e.target.value)}
+              placeholder="https://www.precero.com.au/product/..."
+              className="w-full border rounded px-2 py-1"
+              onKeyDown={(e) => { if (e.key === 'Enter') addFromUrl(); }}
+            />
+          </label>
           <div className="flex items-center gap-2">
-            <button onClick={exportPDF} className="rounded-lg bg-brand-600 text-white px-3 py-2 text-sm">Export PDF</button>
-            <button onClick={onClose} className="rounded-lg border px-3 py-2 text-sm hover:bg-slate-50">Close</button>
+            <button
+              type="button"
+              onClick={addFromUrl}
+              disabled={busy || !addUrl.trim()}
+              className="rounded bg-brand-600 text-white px-3 py-1.5 text-sm disabled:opacity-60"
+            >
+              {busy ? 'Importing…' : 'Import'}
+            </button>
+            {errorMsg && <div className="text-xs text-red-600">{errorMsg}</div>}
           </div>
         </div>
 
-        <div ref={slideRef} className="p-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              {p.image && <img src={p.image} alt={p.name} className="w-full rounded-lg border" />}
-            </div>
-
-            <div className="prose max-w-none">
-              {p.description && <p>{p.description}</p>}
-
-              {!!(p.compliance?.length) && (
-                <>
-                  <h4>Compliance</h4>
-                  <ul>{p.compliance!.map((c, i) => <li key={i}>{c}</li>)}</ul>
-                </>
-              )}
-
-              {!!(p.features?.length) && (
-                <>
-                  <h4>Features</h4>
-                  <ul>{p.features!.map((f, i) => <li key={i}>{f}</li>)}</ul>
-                </>
-              )}
-
-              {!!(p.specs?.length) && (
-                <>
-                  <h4>Specifications</h4>
-                  <table className="w-full text-sm">
-                    <tbody>
-                      {p.specs!.map((s, i) => (
-                        <tr key={i}>
-                          <td className="font-medium pr-3">{s.label}</td>
-                          <td>{s.value}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </>
-              )}
-
-              {!!(p.assets?.length) && (
-                <>
-                  <h4>Downloads</h4>
-                  <ul>{p.assets!.map((a, i) => <li key={i}><a className="underline" href={a.url} target="_blank" rel="noreferrer">{a.label || 'Document'}</a></li>)}</ul>
-                </>
-              )}
-            </div>
-          </div>
-
-          {p.sourceUrl && (
-            <div className="mt-6 text-xs text-slate-500">
-              Source:&nbsp;<a href={p.sourceUrl} target="_blank" rel="noreferrer" className="underline">{p.sourceUrl}</a>
-            </div>
+        {/* Current products */}
+        <div className="space-y-3">
+          {(products ?? []).length === 0 && (
+            <div className="text-sm text-slate-500">No products in this section yet.</div>
           )}
+
+          {(products ?? []).map((p) => (
+            <div key={p.id} className="flex items-start gap-3 border rounded-lg p-3">
+              <div className="w-16 h-16 bg-slate-100 rounded overflow-hidden flex items-center justify-center border">
+                {p.image ? (
+                  <img src={p.image} alt="" className="w-full h-full object-cover" />
+                ) : (
+                  <span className="text-xs text-slate-400">no image</span>
+                )}
+              </div>
+              <div className="flex-1">
+                <div className="font-medium">{p.name || 'Product'}</div>
+                {p.code && <div className="text-xs text-slate-500">{p.code}</div>}
+                {p.sourceUrl && (
+                  <a
+                    href={p.sourceUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-xs text-blue-600 break-all"
+                  >
+                    {p.sourceUrl}
+                  </a>
+                )}
+                {cleanText(p.description) && (
+                  <p className="text-xs text-slate-700 mt-1">{cleanText(p.description)}</p>
+                )}
+              </div>
+              <div className="shrink-0">
+                <button
+                  type="button"
+                  onClick={() => removeProduct(p.id)}
+                  className="rounded border border-rose-300 text-rose-700 px-2 py-1 text-xs hover:bg-rose-50"
+                >
+                  Remove
+                </button>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     </div>
