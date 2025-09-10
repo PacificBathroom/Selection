@@ -316,14 +316,21 @@ export default function SectionSlide({ section, onUpdate }: Props) {
         tags: Array.isArray(data.tags) ? data.tags : undefined,
         sourceUrl: u,
         specPdfUrl: absUrl(data.specPdfUrl, u),
-        assets: Array.isArray(data.assets) ? data.assets : undefined,
-      };
+        assets: Array.isArray(data.assets)
+  ? (data.assets as any[])
+      .map((a) => {
+        // strings → { url }, objects → { url, label } (and absolutize)
+        if (typeof a === 'string') {
+          const uAbs = absUrl(a, u);
+          return uAbs ? { url: uAbs } : null;
+        }
+        const uAbs = absUrl(a?.url, u);
+        if (!uAbs) return null;
+        return { url: uAbs, label: typeof a?.label === 'string' ? a.label : undefined };
+      })
+      .filter(Boolean) as { url: string; label?: string }[]
+  : undefined,
 
-      const next = [...products, p];
-      onUpdate({ ...section, products: next, product: undefined });
-      setAdding(false);
-      setQ('');
-      setResults([]);
     } catch (e: any) {
       console.error('import error', e);
       setErrorMsg(e?.message || 'Failed to import product details.');
