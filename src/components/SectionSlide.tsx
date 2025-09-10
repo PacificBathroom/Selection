@@ -177,7 +177,16 @@ export default function SectionSlide({ section, onUpdate }: Props) {
 
   // SLIDE MODE (product is defined)
   return (
-    <div className="space-y-3">
+    <div className="flex items-center justify-between mb-2">
+  <h2 className="text-lg font-semibold text-gray-800">
+    {section.title || 'Untitled Section'}
+  </h2>
+  <button
+    onClick={exportThisSlide}
+    className="rounded-lg bg-brand-600 text-white px-3 py-1.5 text-sm"
+  >
+  </div>
+<div className="space-y-3">
       <div className="flex justify-end">
         <button onClick={exportThisSlide} className="rounded-lg bg-brand-600 text-white px-3 py-1.5 text-sm">
           Export PDF
