@@ -1,8 +1,5 @@
 // src/types.ts
-export type Asset = {
-  url: string;
-  label?: string;
-};
+export type Asset = { url: string; label?: string };
 
 export type Product = {
   id: string;
@@ -10,31 +7,32 @@ export type Product = {
   name?: string;
   brand?: string;
   category?: string;
-  image?: string;
+  image?: string;          // absolute URL preferred
   gallery?: string[];
   description?: string;
   features?: string[];
-  specs?: any[];
+  specs?: unknown;         // can be [{label,value}] | string[] | Record<string,unknown>
   compliance?: string[];
   tags?: string[];
   sourceUrl?: string;
   specPdfUrl?: string;
-  assets?: Asset[]; // unified type
+  assets?: Asset[];
 };
 
 export type Section = {
   id: string;
   title: string;
-  product?: Product;      // legacy single
-  products?: Product[];   // new multiple
+  // new multi-product model (legacy single 'product' still tolerated in SectionSlide)
+  products?: Product[];
+  product?: Product;
 };
 
 export type ClientInfo = {
-  clientName: string;
   projectName: string;
+  clientName: string;
   dateISO?: string;
 
-  // These are used by FrontPage.tsx:
+  // Contact fields (bring back the inputs you had earlier)
   contactName?: string;
   contactEmail?: string;
   contactPhone?: string;
