@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
++   "cheerio": "^1.0.0-rc.12",
     "@vitejs/plugin-react-swc": "^3.6.0",
     "html2canvas": "^1.4.1",
     "jspdf": "^2.5.2",
