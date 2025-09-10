@@ -2,24 +2,24 @@
 import { GlobalWorkerOptions, getDocument } from 'pdfjs-dist';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 
-// Vite-friendly worker URL import.
-// If this line errors, see the note below about vite-env.d.ts.
+// Vite-friendly worker import (builds a dedicated worker file and returns its URL)
 import pdfWorker from 'pdfjs-dist/build/pdf.worker?worker&url';
 
 // Tell PDF.js where the worker is
 GlobalWorkerOptions.workerSrc = pdfWorker;
 
+type PdfInput = string | File | ArrayBuffer | Uint8Array;
+
 /**
  * Render the first page of a PDF to a PNG data URL.
- * @param file File | ArrayBuffer | Uint8Array
+ * @param input URL string, File, ArrayBuffer, or Uint8Array
  * @param maxWidth Maximum width of the generated image (keeps aspect ratio)
- * @returns data URL (e.g., "data:image/png;base64,...")
  */
 export async function renderPdfFirstPageToDataUrl(
-  file: File | ArrayBuffer | Uint8Array,
+  input: PdfInput,
   maxWidth = 800
 ): Promise<string> {
-  const data = await toArrayBuffer(file);
+  const data = await toArrayBuffer(input);
 
   const loadingTask = getDocument({ data });
   const pdf: PDFDocumentProxy = await loadingTask.promise;
@@ -48,7 +48,13 @@ export async function renderPdfFirstPageToDataUrl(
   return dataUrl;
 }
 
-async function toArrayBuffer(input: File | ArrayBuffer | Uint8Array): Promise<ArrayBuffer> {
+async function toArrayBuffer(input: PdfInput): Promise<ArrayBuffer> {
+  if (typeof input === 'string') {
+    // Fetch the PDF from a URL (must be CORS-accessible)
+    const res = await fetch(input, { mode: 'cors' });
+    if (!res.ok) throw new Error(`Failed to fetch PDF: ${res.status} ${res.statusText}`);
+    return await res.arrayBuffer();
+  }
   if (input instanceof ArrayBuffer) return input;
   if (input instanceof Uint8Array) {
     return input.buffer.slice(input.byteOffset, input.byteOffset + input.byteLength);
