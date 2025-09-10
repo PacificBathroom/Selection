@@ -260,23 +260,18 @@ export default function SectionSlide({ section, onUpdate }: Props) {
 
       <div ref={slideRef} className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-white p-4 rounded-xl shadow-sm border">
         <div>
-          {imgProxied && (
-            <img
-              src={imgProxied}
-              alt={product.name ?? 'Product image'}
-              className="w-full rounded-lg border"
-              onError={(e) => {
-                // fallback to original absolute URL if proxy 404s, so at least an image displays
-                const el = e.currentTarget as HTMLImageElement;
-                if (el.dataset.fallback !== '1' && imgAbs) {
-                  el.dataset.fallback = '1';
-                  el.src = imgAbs;
-                } else {
-                  el.style.display = 'none';
-                }
-              }}
-            />
-          )}
+        {imgProxied && (
+  <img
+    src={imgProxied}
+    alt={product.name ?? 'Product image'}
+    className="w-full rounded-lg border"
+    onError={(e) => {
+      // If the proxy fails, hide the image so the canvas never taints
+      (e.currentTarget as HTMLImageElement).style.display = 'none';
+    }}
+  />
+)}
+
           {specImg && (
             <img src={specImg} alt="Specifications preview" className="w-full mt-4 rounded-lg border bg-white" />
           )}
