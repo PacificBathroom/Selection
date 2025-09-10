@@ -24,12 +24,13 @@ const viaProxy = (u?: string | null): string | undefined =>
 // Simple HTML escaper for cover strings
 function escapeHtml(s: string) {
   return s
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#039;');
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
 }
+
 
 // Wait for any <img> in a node to finish loading (so html2canvas captures it)
 async function waitForImages(root: HTMLElement, timeoutMs = 8000): Promise<void> {
