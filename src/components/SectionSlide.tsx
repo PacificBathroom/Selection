@@ -135,6 +135,12 @@ export default function SectionSlide({ section, onUpdate }: Props) {
     }
   }
 
+  // ---------- Remove product ----------
+  function removeProduct() {
+    setSpecImg(null);
+    onUpdate({ ...section, product: undefined });
+  }
+
   // ---------- Search workflow ----------
   const [q, setQ] = useState('');
   const [searching, setSearching] = useState(false);
@@ -214,7 +220,7 @@ export default function SectionSlide({ section, onUpdate }: Props) {
     return typeof first === 'object' && first && ('label' in first || 'value' in first);
   }, [product?.specs]);
 
-  // compute absolute + proxied image
+  // compute absolute + proxied image (no fallback to raw URL)
   const imgAbs = absUrl(product?.image, product?.sourceUrl);
   const imgProxied = viaProxy(imgAbs);
 
@@ -251,27 +257,36 @@ export default function SectionSlide({ section, onUpdate }: Props) {
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <EditableHeading title={section.title || 'Untitled Section'} onChange={(t) => onUpdate({ ...section, title: t })}/>
-        <button type="button" onClick={exportThisSlide} className="rounded-lg bg-brand-600 text-white px-3 py-1.5 text-sm">
-          Export PDF
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={removeProduct}
+            className="rounded-lg border border-slate-300 text-slate-700 px-3 py-1.5 text-sm hover:bg-slate-50"
+            title="Remove this product from the section"
+          >
+            Remove product
+          </button>
+          <button type="button" onClick={exportThisSlide} className="rounded-lg bg-brand-600 text-white px-3 py-1.5 text-sm">
+            Export PDF
+          </button>
+        </div>
       </div>
 
       {errorMsg && <div className="text-sm text-red-600" role="alert">{errorMsg}</div>}
 
       <div ref={slideRef} className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-white p-4 rounded-xl shadow-sm border">
         <div>
-        {imgProxied && (
-  <img
-    src={imgProxied}
-    alt={product.name ?? 'Product image'}
-    className="w-full rounded-lg border"
-    onError={(e) => {
-      // If the proxy fails, hide the image so the canvas never taints
-      (e.currentTarget as HTMLImageElement).style.display = 'none';
-    }}
-  />
-)}
-
+          {imgProxied && (
+            <img
+              src={imgProxied}
+              alt={product.name ?? 'Product image'}
+              className="w-full rounded-lg border"
+              onError={(e) => {
+                // If the proxy fails, hide the image (no raw fallback)
+                (e.currentTarget as HTMLImageElement).style.display = 'none';
+              }}
+            />
+          )}
           {specImg && (
             <img src={specImg} alt="Specifications preview" className="w-full mt-4 rounded-lg border bg-white" />
           )}
