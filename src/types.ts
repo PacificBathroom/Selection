@@ -22,14 +22,18 @@ export type Product = {
   assets?: Asset[];
 };
 
+// src/types.ts
+export type ClientInfo = {
+  projectName: string;
+  clientName: string;
+  dateISO?: string;          // "YYYY-MM-DD"
+  contactName?: string;
+  contactEmail?: string;
+  contactPhone?: string;
+};
+
 export type Section = {
   id: string;
   title: string;
-  product?: Product;
-};
-
-export type ClientInfo = {
-  projectName?: string;
-  clientName?: string;
-  dateISO?: string;
+  product?: any; // keep your existing shape if you had one
 };
