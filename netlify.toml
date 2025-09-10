@@ -6,7 +6,13 @@
   directory = "netlify/functions"
   node_bundler = "esbuild"
 
-# SPA fallback
+# ✅ Send /api/* to your serverless functions
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/:splat"
+  status = 200
+
+# SPA fallback (keep last)
 [[redirects]]
   from = "/*"
   to = "/index.html"
