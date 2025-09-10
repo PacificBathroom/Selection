@@ -87,17 +87,15 @@ function EditableHeading({ title, onChange }: { title: string; onChange: (t: str
   );
 }
 
-export default function SectionSlide({ section, onUpdate }: Props) {
-  const product = section.product as Product | undefined;
-  const slideRef = useRef<HTMLDivElement>(null);
-
+/** Product card inside a section (image + spec preview + remove) */
+function ProductCard({
+  product, onRemove,
+}: { product: Product; onRemove: () => void }) {
   const [specImg, setSpecImg] = useState<string | null>(null);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // ---------- PDF preview of spec sheet ----------
   useEffect(() => {
     setSpecImg(null);
-    const src = absUrl(product?.specPdfUrl, product?.sourceUrl);
+    const src = absUrl(product.specPdfUrl, product.sourceUrl);
     if (!src) return;
 
     let cancelled = false;
@@ -111,37 +109,154 @@ export default function SectionSlide({ section, onUpdate }: Props) {
     })();
 
     return () => { cancelled = true; };
-  }, [product?.specPdfUrl, product?.sourceUrl]);
+  }, [product.specPdfUrl, product.sourceUrl]);
 
-  // ---------- Export THIS slide ----------
-  async function exportThisSlide() {
+  const imgAbs = absUrl(product.image, product.sourceUrl);
+  const imgProxied = viaProxy(imgAbs);
+
+  // table-like specs?
+  const hasTableLikeSpecs = useMemo(() => {
+    const s = product?.specs;
+    if (!Array.isArray(s) || s.length === 0) return false;
+    const first = s[0] as any;
+    return typeof first === 'object' && first && ('label' in first || 'value' in first);
+  }, [product?.specs]);
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-white p-4 rounded-xl shadow-sm border">
+      <div>
+        {imgProxied && (
+          <img
+            src={imgProxied}
+            alt={product.name ?? 'Product image'}
+            className="w-full rounded-lg border"
+            onError={(e) => {
+              // If the proxy fails, hide the image (no raw fallback)
+              (e.currentTarget as HTMLImageElement).style.display = 'none';
+            }}
+          />
+        )}
+        {specImg && (
+          <img
+            src={specImg}
+            alt="Specifications preview"
+            className="w-full mt-4 rounded-lg border bg-white"
+          />
+        )}
+      </div>
+
+      <div className="prose max-w-none">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="m-0">{product.name ?? 'Selected product'}</h3>
+            {product.code && <p className="text-sm text-slate-500 m-0">{product.code}</p>}
+            {product.sourceUrl && (
+              <p className="m-0">
+                <a href={product.sourceUrl} target="_blank" rel="noreferrer" className="text-blue-600 break-all">
+                  {product.sourceUrl}
+                </a>
+              </p>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={onRemove}
+            className="rounded-lg border border-slate-300 text-slate-700 px-3 py-1.5 text-sm hover:bg-slate-50"
+            title="Remove this product from the section"
+          >
+            Remove
+          </button>
+        </div>
+
+        {cleanText(product.description) && <p>{cleanText(product.description)}</p>}
+
+        {!!product.compliance?.length && (
+          <>
+            <h4>Compliance</h4>
+            <ul>{product.compliance!.map((c: string, i: number) => (<li key={i}>{c}</li>))}</ul>
+          </>
+        )}
+
+        {!!product.features?.length && (
+          <>
+            <h4>Features</h4>
+            <ul>{product.features!.map((f: string, i: number) => (<li key={i}>{f}</li>))}</ul>
+          </>
+        )}
+
+        {!!product.specs?.length && (
+          <>
+            <h4>Specifications</h4>
+            {hasTableLikeSpecs ? (
+              <table className="w-full text-sm">
+                <tbody>
+                  {(product.specs as any[]).map((s: any, i: number) => (
+                    <tr key={i}>
+                      <td className="font-medium pr-3 align-top">{s.label ?? ''}</td>
+                      <td className="align-top">{s.value ?? ''}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <ul>{(product.specs as any[]).map((s: any, i: number) => (<li key={i}>{String(s)}</li>))}</ul>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default function SectionSlide({ section, onUpdate }: Props) {
+  const slideRef = useRef<HTMLDivElement>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const products = section.products ?? [];
+
+  // One-time: migrate legacy `product` → `products[0]`
+  useEffect(() => {
+    if (section.product && (!section.products || section.products.length === 0)) {
+      onUpdate({ ...section, products: [section.product], product: undefined });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Export entire section (auto-splits pages if tall)
+  async function exportThisSection() {
     if (!slideRef.current) return;
     try {
       const canvas = await html2canvas(slideRef.current, {
         scale: 2, useCORS: true, backgroundColor: '#ffffff',
       });
-      const img = canvas.toDataURL('image/png');
+      const imgData = canvas.toDataURL('image/png');
       const pdf = new jsPDF('p', 'mm', 'a4');
       const pageW = pdf.internal.pageSize.getWidth();
       const pageH = pdf.internal.pageSize.getHeight();
       const imgW = pageW;
       const imgH = (canvas.height * imgW) / canvas.width;
-      const y = imgH > pageH ? 0 : (pageH - imgH) / 2;
-      pdf.addImage(img, 'PNG', 0, y, imgW, imgH);
-      pdf.save(`${product?.code || product?.name || section.title || 'selection'}.pdf`);
-    } catch (err: any) {
+
+      let heightLeft = imgH;
+      let position = 0;
+
+      pdf.addImage(imgData, 'PNG', 0, position, imgW, imgH);
+      heightLeft -= pageH;
+
+      while (heightLeft > 0) {
+        position -= pageH;
+        pdf.addPage();
+        pdf.addImage(imgData, 'PNG', 0, position, imgW, imgH);
+        heightLeft -= pageH;
+      }
+
+      pdf.save(`${section.title || 'selection'}.pdf`);
+    } catch (err) {
       console.error('export error', err);
-      setErrorMsg('Could not export this slide. If the console says "tainted canvas", ensure every image/PDF goes through the proxy.');
+      setErrorMsg('Could not export this section. Ensure every image/PDF is loaded via the proxy.');
     }
   }
 
-  // ---------- Remove product ----------
-  function removeProduct() {
-    setSpecImg(null);
-    onUpdate({ ...section, product: undefined });
-  }
-
-  // ---------- Search workflow ----------
+  // Search/import (adds a product)
   const [q, setQ] = useState('');
   const [searching, setSearching] = useState(false);
   const [results, setResults] = useState<Array<{ title: string; url: string; image?: string }>>([]);
@@ -150,7 +265,6 @@ export default function SectionSlide({ section, onUpdate }: Props) {
     const term = q.trim();
     if (!term) return;
     setErrorMsg(null); setSearching(true); setResults([]);
-
     try {
       const res = await fetch(`/api/search?q=${encodeURIComponent(term)}`, { headers: { Accept: 'application/json' }});
       if (!res.ok) {
@@ -205,139 +319,99 @@ export default function SectionSlide({ section, onUpdate }: Props) {
         assets: Array.isArray(data.assets) ? data.assets : undefined,
       };
 
-      onUpdate({ ...section, product: p });
+      const next = [...products, p];
+      onUpdate({ ...section, products: next, product: undefined });
+      setAdding(false);
+      setQ('');
+      setResults([]);
     } catch (e: any) {
       console.error('import error', e);
       setErrorMsg(e?.message || 'Failed to import product details.');
     }
   }
 
-  // ---------- helpers for specs rendering ----------
-  const hasTableLikeSpecs = useMemo(() => {
-    const s = product?.specs;
-    if (!Array.isArray(s) || s.length === 0) return false;
-    const first = s[0] as any;
-    return typeof first === 'object' && first && ('label' in first || 'value' in first);
-  }, [product?.specs]);
-
-  // compute absolute + proxied image (no fallback to raw URL)
-  const imgAbs = absUrl(product?.image, product?.sourceUrl);
-  const imgProxied = viaProxy(imgAbs);
-
-  if (!product) {
-    // SEARCH MODE
-    return (
-      <div className="space-y-4">
-        <EditableHeading title={section.title || 'Untitled Section'} onChange={(t) => onUpdate({ ...section, title: t })}/>
-        <div className="flex gap-2">
-          <input value={q} onChange={(e) => setQ(e.target.value)}
-            placeholder="Search Precero products (e.g. 'la casa 2 in 1')"
-            className="flex-1 rounded-lg border px-3 py-2"
-            onKeyDown={(e) => { if (e.key === 'Enter') search(); }} aria-label="Search products"/>
-          <button type="button" onClick={search} disabled={searching}
-            className="rounded-lg bg-brand-600 text-white px-3 py-2 text-sm disabled:opacity-60" aria-busy={searching}>
-            {searching ? 'Searching…' : 'Search'}
-          </button>
-        </div>
-        {errorMsg && <div className="text-sm text-red-600" role="alert">{errorMsg}</div>}
-        {results.length === 0 && !searching && !errorMsg && (
-          <div className="text-sm text-slate-500">Type a query and click Search to populate this page.</div>
-        )}
-        {results.length > 0 && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {results.map((r, i) => (<ResultCard key={`${r.url}-${i}`} r={r} onPick={() => importUrl(r.url)} />))}
-          </div>
-        )}
-      </div>
-    );
+  function removeProduct(id: string) {
+    const next = (section.products ?? []).filter(p => p.id !== id);
+    onUpdate({ ...section, products: next });
   }
 
-  // SLIDE MODE
+  // --------- RENDER ----------
+  const hasAny = (section.products?.length ?? 0) > 0;
+
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
+      {/* Header row */}
       <div className="flex items-center justify-between">
-        <EditableHeading title={section.title || 'Untitled Section'} onChange={(t) => onUpdate({ ...section, title: t })}/>
+        <EditableHeading
+          title={section.title || 'Untitled Section'}
+          onChange={(t) => onUpdate({ ...section, title: t })}
+        />
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={removeProduct}
+            onClick={() => setAdding(a => !a)}
             className="rounded-lg border border-slate-300 text-slate-700 px-3 py-1.5 text-sm hover:bg-slate-50"
-            title="Remove this product from the section"
           >
-            Remove product
+            {adding ? 'Cancel' : (hasAny ? 'Add product' : 'Add first product')}
           </button>
-          <button type="button" onClick={exportThisSlide} className="rounded-lg bg-brand-600 text-white px-3 py-1.5 text-sm">
-            Export PDF
-          </button>
+          {hasAny && (
+            <button
+              type="button"
+              onClick={exportThisSection}
+              className="rounded-lg bg-brand-600 text-white px-3 py-1.5 text-sm"
+            >
+              Export PDF
+            </button>
+          )}
         </div>
       </div>
 
       {errorMsg && <div className="text-sm text-red-600" role="alert">{errorMsg}</div>}
 
-      <div ref={slideRef} className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-white p-4 rounded-xl shadow-sm border">
-        <div>
-          {imgProxied && (
-            <img
-              src={imgProxied}
-              alt={product.name ?? 'Product image'}
-              className="w-full rounded-lg border"
-              onError={(e) => {
-                // If the proxy fails, hide the image (no raw fallback)
-                (e.currentTarget as HTMLImageElement).style.display = 'none';
-              }}
-            />
-          )}
-          {specImg && (
-            <img src={specImg} alt="Specifications preview" className="w-full mt-4 rounded-lg border bg-white" />
-          )}
-        </div>
+      {/* Product list */}
+      <div ref={slideRef} className="space-y-6">
+        {(section.products ?? []).map((p) => (
+          <ProductCard key={p.id} product={p} onRemove={() => removeProduct(p.id)} />
+        ))}
 
-        <div className="prose max-w-none">
-          <h3 className="m-0">{product.name ?? 'Selected product'}</h3>
-          {product.code && <p className="text-sm text-slate-500 m-0">{product.code}</p>}
-          {product.sourceUrl && (
-            <p className="m-0">
-              <a href={product.sourceUrl} target="_blank" rel="noreferrer" className="text-blue-600 break-all">
-                {product.sourceUrl}
-              </a>
-            </p>
-          )}
-          {cleanText(product.description) && <p>{cleanText(product.description)}</p>}
+        {/* Search panel (only visible when adding OR when no products yet) */}
+        {(adding || !hasAny) && (
+          <div className="space-y-3">
+            <div className="flex gap-2">
+              <input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Search Precero products (e.g. 'la casa 2 in 1')"
+                className="flex-1 rounded-lg border px-3 py-2"
+                onKeyDown={(e) => { if (e.key === 'Enter') search(); }}
+                aria-label="Search products"
+              />
+              <button
+                type="button"
+                onClick={search}
+                disabled={searching}
+                className="rounded-lg bg-brand-600 text-white px-3 py-2 text-sm disabled:opacity-60"
+                aria-busy={searching}
+              >
+                {searching ? 'Searching…' : 'Search'}
+              </button>
+            </div>
 
-          {!!product.compliance?.length && (
-            <>
-              <h4>Compliance</h4>
-              <ul>{product.compliance!.map((c: string, i: number) => (<li key={i}>{c}</li>))}</ul>
-            </>
-          )}
+            {results.length === 0 && !searching && (
+              <div className="text-sm text-slate-500">
+                Type a query and click Search to add a product to this section.
+              </div>
+            )}
 
-          {!!product.features?.length && (
-            <>
-              <h4>Features</h4>
-              <ul>{product.features!.map((f: string, i: number) => (<li key={i}>{f}</li>))}</ul>
-            </>
-          )}
-
-          {!!product.specs?.length && (
-            <>
-              <h4>Specifications</h4>
-              {hasTableLikeSpecs ? (
-                <table className="w-full text-sm">
-                  <tbody>
-                    {(product.specs as any[]).map((s: any, i: number) => (
-                      <tr key={i}>
-                        <td className="font-medium pr-3 align-top">{s.label ?? ''}</td>
-                        <td className="align-top">{s.value ?? ''}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              ) : (
-                <ul>{(product.specs as any[]).map((s: any, i: number) => (<li key={i}>{String(s)}</li>))}</ul>
-              )}
-            </>
-          )}
-        </div>
+            {results.length > 0 && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {results.map((r, i) => (
+                  <ResultCard key={`${r.url}-${i}`} r={r} onPick={() => importUrl(r.url)} />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
