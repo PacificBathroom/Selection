@@ -1,43 +1,30 @@
 // src/types.ts
-export type Asset = { url: string; label?: string };
 
+// Row shape coming from Google Sheets (used by gallery/section UIs)
 export type Product = {
-  id: string;
-  code?: string;
-  name?: string;
-  brand?: string;
+  product?: string;
+  sku?: string;
+  price?: number | string;
   category?: string;
-  image?: string;          // absolute URL preferred
-  gallery?: string[];
+  thumbnail?: string;
   description?: string;
-  features?: string[];
-  specs?: unknown;         // can be [{label,value}] | string[] | Record<string,unknown>
-  compliance?: string[];
-  tags?: string[];
-  sourceUrl?: string;
-  specPdfUrl?: string;
-  assets?: Asset[];
+  client_name?: string;
+  pdf_url?: string;
+  [k: string]: any;
 };
 
-// src/types.ts
+// Top-of-page details card state
 export type ClientInfo = {
   clientName: string;
   projectName: string;
-  dateISO?: string;
+  dateISO?: string;       // yyyy-mm-dd for <input type="date" />
   contactName?: string;
   contactEmail?: string;
   contactPhone?: string;
 };
 
-// Minimal section type so older code (exporters/drawer) compiles
+// Minimal section type (kept so older modules/imports compile)
 export type Section = {
   id: string;
   title: string;
-};
-
-
-  // Contact fields (bring back the inputs you had earlier)
-  contactName?: string;
-  contactEmail?: string;
-  contactPhone?: string;
 };
