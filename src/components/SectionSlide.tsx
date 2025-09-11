@@ -1,14 +1,17 @@
 // src/components/SectionSlide.tsx
+
 import React, { useEffect, useMemo, useState } from "react";
 import type { Section } from "../types";
 import { fetchProducts, type ProductRow } from "../api/sheets";
 
 // Props: the parent (SectionsDeck) passes a single section.
-// Optionally you can receive a callback when a product is chosen.
+// at the top of SectionSlide.tsx
 type Props = {
   section: Section;
   onSelectProduct?: (p: ProductRow) => void;
+  onUpdate?: (next: Section) => void; // <-- add this
 };
+
 
 export default function SectionSlide({ section, onSelectProduct }: Props) {
   // Local search/filter state for this section view
