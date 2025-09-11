@@ -10,7 +10,8 @@ type Props = {
   range?: string;
 };
 
-export default function ProductGallery({ client, range }: Props) {
+export default function <ProductGallery client={client} range="Sheet1!A1:ZZ" />
+ Props) {
   const [items, setItems] = useState<Product[]>([]);
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("");
