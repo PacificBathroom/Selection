@@ -1,23 +1,13 @@
-import { useId } from "react";
+import React, { useId } from "react";
+import type { ClientInfo } from "../types";
 
-export type ProjectDetails = {
-  projectName: string;
-  clientName: string;
-  contactName: string;
-  contactEmail: string;
-  contactPhone: string;
-  date: string; // dd/mm/yyyy
+type Props = {
+  client: ClientInfo;
+  setClient: (next: ClientInfo) => void;
+  logoUrl?: string;
 };
 
-export default function ProjectDetailsCard({
-  value,
-  onChange,
-  logoUrl = "/brand/logo.png",
-}: {
-  value: ProjectDetails;
-  onChange: (next: ProjectDetails) => void;
-  logoUrl?: string;
-}) {
+export default function ProjectDetailsCard({ client, setClient, logoUrl = "/logo.png" }: Props) {
   const ids = {
     project: useId(),
     client: useId(),
@@ -26,130 +16,108 @@ export default function ProjectDetailsCard({
     phone: useId(),
     date: useId(),
   };
-
-  const set = (patch: Partial<ProjectDetails>) =>
-    onChange({ ...value, ...patch });
+  const on = (k: keyof ClientInfo) =>
+    (e: React.ChangeEvent<HTMLInputElement>) =>
+      setClient({ ...client, [k]: e.target.value });
 
   return (
-    <section
-      style={{
-        background: "#fff",
-        borderRadius: 16,
-        boxShadow: "0 10px 30px rgba(0,0,0,0.06)",
-        border: "1px solid #eef2f7",
-        padding: 20,
-      }}
-    >
-      {/* Title row (like slide) */}
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+    <section className="bg-white rounded-2xl shadow-[0_10px_30px_rgba(0,0,0,0.06)] border border-slate-100 p-5">
+      {/* Title row, like your Google Slide */}
+      <div className="flex items-start justify-between gap-3">
         <div>
-          <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: "#0f172a" }}>
-            Project Selection
-          </h2>
-          <div style={{ marginTop: 4, fontSize: 12, color: "#6b7280" }}>
-            Prepared for <strong>{value.clientName || "Client name"}</strong>
+          <h2 className="m-0 text-[22px] font-bold text-slate-900">Project Selection</h2>
+          <div className="mt-1 text-xs text-slate-500">
+            Prepared for <strong>{client.clientName || "Client name"}</strong>
           </div>
         </div>
-        <img src={logoUrl} alt="Logo" style={{ height: 28, objectFit: "contain", opacity: 0.9 }} />
+        <img src={logoUrl} alt="Logo" className="h-7 opacity-90" />
       </div>
 
-      {/* Form grid (2 columns like your slide) */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr",
-          gap: 12,
-          marginTop: 16,
-        }}
-      >
-        <L label="Project name" htmlFor={ids.project}>
+      {/* 2-column grid of inputs */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
+        <Label htmlFor={ids.project} text="Project name">
           <input
             id={ids.project}
-            value={value.projectName}
-            onChange={(e) => set({ projectName: e.target.value })}
+            className={inputCls}
             placeholder="Project Selection"
-            style={inputStyle}
+            value={client.projectName || ""}
+            onChange={on("projectName")}
           />
-        </L>
+        </Label>
 
-        <L label="Client name" htmlFor={ids.client}>
+        <Label htmlFor={ids.client} text="Client name">
           <input
             id={ids.client}
-            value={value.clientName}
-            onChange={(e) => set({ clientName: e.target.value })}
+            className={inputCls}
             placeholder="Client name"
-            style={inputStyle}
+            value={client.clientName || ""}
+            onChange={on("clientName")}
           />
-        </L>
+        </Label>
 
-        <L label="Your name (contact)" htmlFor={ids.contact}>
+        <Label htmlFor={ids.contact} text="Your name (contact)">
           <input
             id={ids.contact}
-            value={value.contactName}
-            onChange={(e) => set({ contactName: e.target.value })}
+            className={inputCls}
             placeholder="Your Name"
-            style={inputStyle}
+            value={client.contactName || ""}
+            onChange={on("contactName")}
           />
-        </L>
+        </Label>
 
-        <L label="Date" htmlFor={ids.date}>
+        <Label htmlFor={ids.date} text="Date">
+          {/* use your existing dateISO field (type=date for easy picking) */}
           <input
             id={ids.date}
-            value={value.date}
-            onChange={(e) => set({ date: e.target.value })}
-            placeholder="dd/mm/yyyy"
-            style={inputStyle}
-            inputMode="numeric"
+            type="date"
+            className={inputCls}
+            value={client.dateISO || ""}
+            onChange={on("dateISO")}
           />
-        </L>
+        </Label>
 
-        <L label="Email" htmlFor={ids.email}>
+        <Label htmlFor={ids.email} text="Email">
           <input
             id={ids.email}
             type="email"
-            value={value.contactEmail}
-            onChange={(e) => set({ contactEmail: e.target.value })}
+            className={inputCls}
             placeholder="you@example.com"
-            style={inputStyle}
+            value={client.contactEmail || ""}
+            onChange={on("contactEmail")}
           />
-        </L>
+        </Label>
 
-        <L label="Phone" htmlFor={ids.phone}>
+        <Label htmlFor={ids.phone} text="Phone">
           <input
             id={ids.phone}
-            value={value.contactPhone}
-            onChange={(e) => set({ contactPhone: e.target.value })}
-            placeholder="0000 000 000"
-            style={inputStyle}
             inputMode="tel"
+            className={inputCls}
+            placeholder="0000 000 000"
+            value={client.contactPhone || ""}
+            onChange={on("contactPhone")}
           />
-        </L>
+        </Label>
       </div>
     </section>
   );
 }
 
-function L({
-  label,
+function Label({
   htmlFor,
+  text,
   children,
 }: {
-  label: string;
   htmlFor: string;
+  text: string;
   children: React.ReactNode;
 }) {
   return (
-    <label htmlFor={htmlFor} style={{ display: "grid", gap: 6 }}>
-      <span style={{ fontSize: 12, color: "#6b7280" }}>{label}</span>
+    <label htmlFor={htmlFor} className="grid gap-1">
+      <span className="text-xs text-slate-500">{text}</span>
       {children}
     </label>
   );
 }
 
-const inputStyle: React.CSSProperties = {
-  width: "100%",
-  padding: "10px 12px",
-  borderRadius: 10,
-  border: "1px solid #e5e7eb",
-  outline: "none",
-};
+const inputCls =
+  "w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-slate-400";
