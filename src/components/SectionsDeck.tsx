@@ -88,10 +88,18 @@ export default function SectionsDeck({ client, sections, setSections }: Props) {
           </div>
 
           <div className="p-4">
-            <SectionSlide
-              section={section}
-              onUpdate={(next) => updateSection(section.id, next)}
-            />
+            <import type { Section } from "../types"; // ensure this is imported at the top
+
+<SectionSlide
+  section={section}
+  onUpdate={(next: Section) => {
+    // your existing update logic, e.g.:
+    setSections((prev) =>
+      prev.map((s) => (s.id === next.id ? next : s))
+    );
+  }}
+/>
+
           </div>
         </div>
       ))}
