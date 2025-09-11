@@ -11,14 +11,18 @@ exports.handler = async (event) => {
     try { url = decodeURIComponent(url); } catch {}
 
     const debug = String(qs.debug || "") === "1";
+    if (!url || !/^https?:\/\//i.test(url)) return text(400, "Invalid or missing url");
 
-    if (!url || !/^https?:\/\//i.test(url)) {
-      return text(400, "Invalid or missing url");
-    }
+    const r = await fetch(url, {
+      redirect: "follow",
+      headers: {
+        // Some hosts (incl. Drive/CDNs) behave better with these:
+        "User-Agent": "Mozilla/5.0 (compatible; NetlifyPDFProxy/1.0)",
+        "Accept": "*/*",
+      },
+    });
 
-    const r = await fetch(url, { redirect: "follow" });
     const ct = r.headers.get("content-type") || "application/octet-stream";
-
     if (debug) {
       return json(200, {
         requestedUrl: url,
@@ -28,10 +32,7 @@ exports.handler = async (event) => {
         contentType: ct,
       });
     }
-
-    if (!r.ok) {
-      return text(r.status, `Upstream error ${r.status} for ${r.url}`);
-    }
+    if (!r.ok) return text(r.status, `Upstream error ${r.status} for ${r.url}`);
 
     const buf = await r.arrayBuffer();
     return {
