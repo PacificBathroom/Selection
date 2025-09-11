@@ -155,7 +155,7 @@ export default function ProductDrawer({ open, onClose, section, onUpdate }: Prop
             <div className="text-sm text-slate-500">No products in this section yet.</div>
           )}
 
-          {(products ?? []).map((p) => (
+          {(products ?? []).map((p: any) => (
             <div key={p.id} className="flex items-start gap-3 border rounded-lg p-3">
               <div className="w-16 h-16 bg-slate-100 rounded overflow-hidden flex items-center justify-center border">
                 {p.image ? (
