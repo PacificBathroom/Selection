@@ -1,57 +1,17 @@
 // src/utils/pptExporter.ts
 
-// Types aren’t exported in this build; use default export and loose typing
-// @ts-ignore
+// @ts-ignore - pptxgenjs ships default export in this build
 import PptxGenJS from "pptxgenjs";
-
-type TableRow = any;
-type TableCell = any;
-
 import { renderPdfFirstPageToDataUrl } from "../utils/pdfPreview";
-import type { Section, Product, ClientInfo } from "../types";
+import type { ClientInfo, Product } from "../types";
 
-/** Proxy any external URL via our Netlify function (keeps CORS clean) */
+/** If URL is external, route via our proxy to avoid CORS issues */
 const viaProxy = (u?: string | null) =>
   u && /^https?:\/\//i.test(u) ? `/api/pdf-proxy?url=${encodeURIComponent(u)}` : u || undefined;
 
-function cleanText(input?: string | null, maxLen = 1200): string | undefined {
-  if (!input) return undefined;
-  let s = String(input);
-  s = s.replace(/window\._wpemojiSettings[\s\S]*?\};?/gi, " ");
-  s = s.replace(/\/\*![\s\S]*?\*\//g, " ");
-  s = s.replace(/<script[\s\S]*?<\/script>/gi, " ");
-  s = s.replace(/<style[\s\S]*?<\/style>/gi, " ");
-  s = s.replace(/\S{120,}/g, " ");
-  s = s.replace(/\s+/g, " ").trim();
-  if (s.length > maxLen) s = s.slice(0, maxLen).trimEnd() + "…";
-  return s || undefined;
-}
-
-type SpecRow = { label?: string; value?: string } | string;
-
-function normalizeSpecs(
-  specs?: any
-): { kv?: { label: string; value: string }[]; bullets?: string[] } {
-  if (!Array.isArray(specs) || specs.length === 0) return {};
-  const kv: { label: string; value: string }[] = [];
-  const bullets: string[] = [];
-  (specs as SpecRow[]).forEach((s) => {
-    if (s && typeof s === "object" && ("label" in s || "value" in s)) {
-      kv.push({
-        label: String((s as any).label ?? "").trim(),
-        value: String((s as any).value ?? "").trim(),
-      });
-    } else {
-      bullets.push(String(s));
-    }
-  });
-  return { kv: kv.length ? kv : undefined, bullets: bullets.length ? bullets : undefined };
-}
-
 async function urlToDataUrl(u: string): Promise<string> {
-  const proxied = viaProxy(u)!;
-  const res = await fetch(proxied, { credentials: "omit" });
-  if (!res.ok) throw new Error(`Fetch failed: ${res.status} for ${u}`);
+  const res = await fetch(viaProxy(u)!, { credentials: "omit" });
+  if (!res.ok) throw new Error(`Fetch failed ${res.status} for ${u}`);
   const blob = await res.blob();
   return await new Promise<string>((resolve, reject) => {
     const fr = new FileReader();
@@ -60,232 +20,131 @@ async function urlToDataUrl(u: string): Promise<string> {
     fr.readAsDataURL(blob);
   });
 }
+const strip = (d: string) => d.replace(/^data:[^;]+;base64,/, "");
 
-const stripDataPrefix = (dataUrl: string) => dataUrl.replace(/^data:[^;]+;base64,/, "");
-
-type ExportArgs = { client: ClientInfo; sections: Section[] };
-
-/**
- * Export a PowerPoint deck using current client info and selected products.
- * NOTE: This version is aligned with Google Sheets column names:
- * - product title: product.product (fallback product.name)
- * - thumbnail: product.thumbnail (fallback product.image)
- * - PDF: product.pdf_url (fallback product.specPdfUrl)
- * - source link (optional): product.source_url (fallback product.sourceUrl)
- */
-export async function exportDeckPptx({ client, sections }: ExportArgs) {
+/** Export slides directly from a flat list of products (no sections) */
+export async function exportDeckFromProducts({
+  client,
+  products,
+}: {
+  client: ClientInfo;
+  products: Product[];
+}) {
   const pptx = new PptxGenJS();
-  // A4 so it prints nicely
   pptx.layout = "A4"; // 8.27 x 11.69 in
 
-  // ------------- Cover -------------
+  // ---------- Cover ----------
   {
     const slide = pptx.addSlide();
-    slide.addText("SELECTION DECK", {
-      x: 0.5,
-      y: 0.4,
-      w: 7.3,
-      fontSize: 12,
-      bold: true,
-      color: "666666",
-    });
-
-    slide.addText(client.projectName || "Project Selection", {
-      x: 0.5,
-      y: 0.9,
-      w: 7.3,
-      fontSize: 32,
-      bold: true,
-      color: "0F172A",
-    });
-
-    slide.addText(`Prepared for ${client.clientName || "Client name"}`, {
-      x: 0.5,
-      y: 1.6,
-      w: 7.3,
-      fontSize: 14,
-      color: "334155",
-    });
-
-    const dateStr = client.dateISO
-      ? new Date(client.dateISO).toLocaleDateString()
-      : new Date().toLocaleDateString();
+    slide.addText("SELECTION DECK", { x: 0.5, y: 0.4, w: 7.3, fontSize: 12, bold: true, color: "666666" });
+    slide.addText(client.projectName || "Project Selection", { x: 0.5, y: 0.9, w: 7.3, fontSize: 32, bold: true, color: "0F172A" });
+    slide.addText(`Prepared for ${client.clientName || "Client name"}`, { x: 0.5, y: 1.6, w: 7.3, fontSize: 14, color: "334155" });
+    const dateStr = client.dateISO ? new Date(client.dateISO).toLocaleDateString() : new Date().toLocaleDateString();
     slide.addText(dateStr, { x: 0.5, y: 1.95, w: 7.3, fontSize: 12, color: "64748B" });
-
-    // Centered logo (ensure /logo.png exists or change the path)
-    slide.addImage({
-      path: "/logo.png",
-      x: 1.65, // center-ish
-      y: 2.7,
-      w: 5.0,
-      h: 2.3,
-    });
-
-    slide.addText("Built with React + Tailwind  ·  Exported from Pacific Bathroom Selection", {
-      x: 0.5,
-      y: 5.0,
-      w: 7.3,
-      fontSize: 9,
-      color: "94A3B8",
-      align: "center",
-    });
+    slide.addImage({ path: "/logo.png", x: 1.65, y: 2.7, w: 5.0, h: 2.3 });
   }
 
-  // Collect all products from sections (legacy structure)
-  const allProducts: { sectionIndex: number; product: Product; sectionTitle: string }[] = [];
-  sections.forEach((s, idx) => {
-    (s.products || []).forEach((p: Product) =>
-      allProducts.push({ sectionIndex: idx, product: p, sectionTitle: s.title || "" })
-    );
-  });
-
-  // ------------- Product slides (one per product) -------------
-  for (const { sectionIndex, product, sectionTitle } of allProducts) {
+  // ---------- One slide per product ----------
+  for (const p of products) {
     const slide = pptx.addSlide();
 
-    // Title uses Google Sheets "product" column; fallbacks to "name"
-    const productTitle =
-      (product.product as string) || (product.name as string) || "Product";
+    // Map your sheet columns to variables (with safe fallbacks)
+    const productName = String((p.product ?? p.name ?? "Product") || "");
+    const productCode = String(p.code ?? p.Code ?? p.sku ?? "");
+    const imageUrl = (p.thumbnail as string) || (p.Image as string) || (p.image as string) || "";
+    const pdfUrl = (p["pdf_url"] as string) || (p["PDF URL"] as string) || (p.specPdfUrl as string) || "";
+    const description = String((p.description ?? p.Description ?? "") || "");
+    const contactName = String((p["Contact Name"] ?? p.contact_name ?? "") || "");
+    const contactDetails = String((p["Contact Details"] ?? "") || "");
 
-    slide.addText(`${sectionTitle || `Selection`}  –  ${productTitle}`, {
-      x: 0.5,
-      y: 0.3,
-      w: 7.3,
-      fontSize: 16,
-      bold: true,
-      color: "0F172A",
-    });
-
-    // Left: product image (thumbnail) and optional first page of PDF
-    let imgData: string | undefined;
-
-    // Prefer Google Sheets "thumbnail", fallback to "image"
-    const imageUrl =
-      (product.thumbnail as string) || (product.image as string) || "";
-
-    const leftX = 0.5;
-    let leftY = 0.9;
-    const leftW = 4.3;
+    // --- Layout like your mock ---
+    // Top: IMAGE_BOX (left) and SPECS preview (right)
+    const imgLeftX = 0.6;
+    const imgTopY = 0.8;
+    const imgW = 4.2;
+    const imgH = 3.5;
 
     if (imageUrl) {
       try {
         const dataUrl = await urlToDataUrl(imageUrl);
-        imgData = stripDataPrefix(dataUrl);
-      } catch {
-        // ignore fetch failures
-      }
-    }
-
-    if (imgData) {
-      slide.addImage({
-        data: imgData,
-        x: leftX,
-        y: leftY,
-        w: leftW,
-        h: 4.0,
-        sizing: { type: "contain", w: leftW, h: 4.0 },
+        slide.addImage({ data: strip(dataUrl), x: imgLeftX, y: imgTopY, w: imgW, h: imgH, sizing: { type: "contain", w: imgW, h: imgH } });
+      } catch {}
+    } else {
+      // light placeholder box so it still looks structured
+      slide.addShape(pptx.ShapeType.rect, {
+        x: imgLeftX,
+        y: imgTopY,
+        w: imgW,
+        h: imgH,
+        line: { color: "C7D2FE" },
+        fill: { color: "F8FAFC" },
       });
-      leftY += 4.2;
+      slide.addText("[[IMAGE_BOX]]", { x: imgLeftX + 0.15, y: imgTopY + 0.15, fontSize: 10, color: "9CA3AF" });
     }
 
-    // Spec PDF first page preview: prefer "pdf_url", fallback to "specPdfUrl"
-    const pdfUrl = (product.pdf_url as string) || (product.specPdfUrl as string) || "";
+    // Right: SPECS = first page of PDF
+    const specsX = 5.1;
+    const specsY = 0.8;
+    const specsW = 2.6;
+    const specsH = 3.5;
+
     if (pdfUrl) {
       try {
         const png = await renderPdfFirstPageToDataUrl(viaProxy(pdfUrl)!, 1200);
-        slide.addImage({
-          data: stripDataPrefix(png),
-          x: leftX,
-          y: leftY,
-          w: leftW,
-          h: 3.2,
-          sizing: { type: "contain", w: leftW, h: 3.2 },
-        });
+        slide.addImage({ data: strip(png), x: specsX, y: specsY, w: specsW, h: specsH, sizing: { type: "contain", w: specsW, h: specsH } });
       } catch {
-        // ignore pdf render failures
+        slide.addShape(pptx.ShapeType.rect, { x: specsX, y: specsY, w: specsW, h: specsH, line: { color: "C7D2FE" }, fill: { color: "F8FAFC" } });
+        slide.addText("([[SPECS]])", { x: specsX + 0.15, y: specsY + 0.15, fontSize: 10, color: "9CA3AF" });
       }
-    }
-
-    // Right column: link + description + specifications
-    const rightX = 5.1;
-    let rightY = 0.9;
-
-    // Optional source link: prefer "source_url", fallback "sourceUrl"
-    const sourceUrl =
-      (product.source_url as string) || (product.sourceUrl as string) || "";
-    if (sourceUrl) {
-      slide.addText(sourceUrl, {
-        x: rightX,
-        y: rightY,
-        w: 2.6,
-        fontSize: 10,
-        color: "2563EB",
-        hyperlink: { url: sourceUrl },
-      });
-      rightY += 0.25;
-    }
-
-    if (product.description) {
-      const desc = cleanText(product.description as string, 600);
-      if (desc) {
-        slide.addText(desc, { x: rightX, y: rightY, w: 2.6, fontSize: 11, color: "334155" });
-        rightY += 1.0;
-      }
-    }
-
-    // Specifications block
-    slide.addText("Specifications", {
-      x: rightX,
-      y: rightY,
-      w: 2.6,
-      fontSize: 12,
-      bold: true,
-      color: "0F172A",
-    });
-    rightY += 0.24;
-
-    const { kv, bullets } = normalizeSpecs((product as any).specs);
-
-    if (kv && kv.length) {
-      // render as two-column table
-      const rows: TableRow[] = kv.map((r) => [
-        { text: r.label || "" } as TableCell,
-        { text: r.value || "" } as TableCell,
-      ]);
-
-      slide.addTable(rows, {
-        x: rightX,
-        y: rightY,
-        w: 2.6,
-        fontSize: 10,
-        colW: [1.0, 1.6],
-        // Minimal styling; uncomment to strip borders completely (depends on pptxgen version):
-        // border: { type: "none" } as any,
-      });
-      rightY += 0.24 + Math.min(3.5, kv.length * 0.24);
-    } else if (bullets && bullets.length) {
-      slide.addText(bullets.map((b: string) => `• ${b}`).join("\n"), {
-        x: rightX,
-        y: rightY,
-        w: 2.6,
-        fontSize: 10.5,
-        color: "334155",
-      });
-      rightY += 0.24 + Math.min(3.5, bullets.length * 0.22);
-    } else if ((product as any).features && (product as any).features.length) {
-      slide.addText(
-        ((product as any).features as string[]).map((b) => `• ${b}`).join("\n"),
-        { x: rightX, y: rightY, w: 2.6, fontSize: 10.5, color: "334155" }
-      );
-      rightY += 0.24 + Math.min(3.5, (product as any).features.length * 0.22);
     } else {
-      slide.addText("—", { x: rightX, y: rightY, w: 2.6, fontSize: 10.5, color: "94A3B8" });
-      rightY += 0.24;
+      slide.addShape(pptx.ShapeType.rect, { x: specsX, y: specsY, w: specsW, h: specsH, line: { color: "C7D2FE" }, fill: { color: "F8FAFC" } });
+      slide.addText("([[SPECS]])", { x: specsX + 0.15, y: specsY + 0.15, fontSize: 10, color: "9CA3AF" });
     }
+
+    // Product name in a box centered-ish (like your mock)
+    slide.addShape(pptx.ShapeType.rect, {
+      x: 2.0,
+      y: 4.5,
+      w: 4.0,
+      h: 0.85,
+      line: { color: "9CA3AF" },
+      fill: { color: "FFFFFF" },
+    });
+    slide.addText(productName, { x: 2.1, y: 4.62, w: 3.8, fontSize: 16, bold: true, color: "0F172A", align: "center" });
+
+    // Description bullets under the name box
+    if (description) {
+      slide.addText(`• ${description}`, { x: 2.1, y: 5.45, w: 3.8, fontSize: 12, color: "374151" });
+    }
+
+    // Left gutter: PRODUCT_CODE
+    if (productCode) {
+      slide.addText(productCode, { x: 0.6, y: 4.45, w: 1.3, fontSize: 11, color: "0F172A" });
+    }
+
+    // Bottom blue bar with contact name + contact details
+    slide.addShape(pptx.ShapeType.rect, {
+      x: 0.5,
+      y: 6.5,
+      w: 7.3,
+      h: 0.35,
+      fill: { color: "1D4ED8" }, // brand blue
+      line: { color: "1D4ED8" },
+    });
+
+    const bottomText = [
+      contactName || client.contactName || "",
+      contactDetails || [client.contactEmail, client.contactPhone].filter(Boolean).join("  |  "),
+    ];
+
+    slide.addText(bottomText.filter(Boolean).join("      "), {
+      x: 0.7,
+      y: 6.56,
+      w: 6.9,
+      fontSize: 10,
+      color: "FFFFFF",
+    });
   }
 
-  // Save deck
-  await pptx.writeFile({
-    fileName: `${client.projectName || "Project Selection"}.pptx`,
-  });
+  await pptx.writeFile({ fileName: `${client.projectName || "Project Selection"}.pptx` });
 }
