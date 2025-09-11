@@ -1,11 +1,9 @@
 // src/components/SectionSlide.tsx
-// Types aren’t exported in this build; use default export and loose typing
-// @ts-ignore
-import PptxGenJS from 'pptxgenjs';
-type TableRow = any;
-type TableCell = any;
-import React, { useEffect, useMemo, useState } from 'react';
-import type { Section, Product } from '../types';
+import { fetchProducts, type ProductRow } from "../api/sheets";
+// ...
+const [items, setItems] = useState<ProductRow[]>([]);
+useEffect(() => { fetchProducts({ q: search, category }).then(setItems).catch(console.error); }, [search, category]);
+
 import { renderPdfFirstPageToDataUrl } from '../utils/pdfPreview';
 
 type Props = { section: Section; onUpdate: (next: Section) => void };
