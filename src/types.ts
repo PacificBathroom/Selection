@@ -19,10 +19,22 @@ export type Product = {
   assets?: Asset[];
 };
 
+// src/types.ts
 export type ClientInfo = {
-  projectName: string;
   clientName: string;
+  projectName: string;
   dateISO?: string;
+  contactName?: string;
+  contactEmail?: string;
+  contactPhone?: string;
+};
+
+// Minimal section type so older code (exporters/drawer) compiles
+export type Section = {
+  id: string;
+  title: string;
+};
+
 
   // Contact fields (bring back the inputs you had earlier)
   contactName?: string;
