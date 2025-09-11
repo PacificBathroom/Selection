@@ -4,48 +4,31 @@ import PptxGenJS from "pptxgenjs";
 import { renderPdfFirstPageToDataUrl } from "../utils/pdfPreview";
 import type { ClientInfo, Product } from "../types";
 
-/* =========================
-   THEME
-   ========================= */
+/* ===== STYLE ===== */
 const FONT = "Calibri";
 const COLOR_TEXT = "0F172A";
 const COLOR_SUB = "334155";
 const COLOR_MUTED = "64748B";
-const COLOR_FOOTER = "0B3C8C";
-const COLOR_GUIDE = "E5E7EB";
-const COLOR_DESC = "374151";
 
-// Layout coordinates
-const COVER = {
-  title: { x: 0.8, y: 0.9, w: 11.8 },
-  sub:   { x: 0.8, y: 1.65, w: 11.8 },
-  date:  { x: 0.8, y: 2.05, w: 11.8 },
-  logo:  { x: 3.6, y: 2.7, w: 6.1, h: 3.1 },
-};
-
+/* ===== GEOMETRY (16:9) ===== */
 const PRODUCT = {
-  img:     { x: 0.6, y: 0.8, w: 6.3, h: 4.3 },
-  specs:   { x: 7.2, y: 0.8, w: 5.6, h: 4.3 },
-  title:   { x: 3.8, y: 5.38, w: 5.8 },
-  desc:    { x: 3.8, y: 6.2,  w: 5.8 },
-  code:    { x: 0.6, y: 6.4,  w: 2.0 },
-  footer:  { bar: { x: 0.5, y: 6.9, w: 12.3, h: 0.35 }, text: { x: 0.7, y: 6.95, w: 12.0 } },
+  img:   { x: 0.6, y: 0.8, w: 6.0, h: 4.2 },
+  specs: { x: 7.0, y: 0.8, w: 5.5, h: 4.2 },
+  title: { x: 0.6, y: 5.2, w: 12.0 },
+  desc:  { x: 0.6, y: 5.8, w: 12.0 },
+  code:  { x: 0.6, y: 6.2, w: 12.0 },
+  footer:{ bar:{ x:0, y:6.8, w:13.33, h:0.35 }, text:{ x:0.3, y:6.85, w:12.7 } }
 };
 
-/* =========================
-   Helpers
-   ========================= */
-const tx = (s: any, t: string, o: any) => s.addText(t, { fontFace: FONT, ...o });
+/* ===== HELPERS ===== */
+const tx = (s: any, t: string, o: any) => t && s.addText(t, { fontFace: FONT, ...o });
 
-const toB64 = (s: string) => {
-  try { return btoa(unescape(encodeURIComponent(s))); }
-  catch { return window.btoa(s as any); }
-};
+const strip = (d: string) => d.replace(/^data:[^;]+;base64,/, "");
 
 const viaProxy = (u?: string | null) => {
   const s = (u ?? "").toString().trim();
   if (!s || !/^https?:\/\//i.test(s)) return undefined;
-  return `/api/pdf-proxy?url_b64=${toB64(s)}`;
+  return `/api/pdf-proxy?url=${encodeURIComponent(s)}`;
 };
 
 async function fetchAsDataUrl(u: string): Promise<string> {
@@ -54,26 +37,24 @@ async function fetchAsDataUrl(u: string): Promise<string> {
   const res = await fetch(proxied, { credentials: "omit" });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const blob = await res.blob();
-  return await new Promise((resolve, reject) => {
+  return new Promise<string>((resolve, reject) => {
     const fr = new FileReader();
     fr.onload = () => resolve(String(fr.result));
     fr.onerror = reject;
     fr.readAsDataURL(blob);
   });
 }
-const strip = (d: string) => d.replace(/^data:[^;]+;base64,/, "");
 
 const autoTitleSize = (name: string) => {
   const len = name?.length || 0;
   if (len <= 28) return 24;
   if (len <= 36) return 22;
   if (len <= 48) return 20;
-  return 18;
+  if (len <= 60) return 18;
+  return 16;
 };
 
-/* =========================
-   Exporter
-   ========================= */
+/* ===== EXPORTER ===== */
 export async function exportDeckFromProducts({
   client,
   products,
@@ -81,31 +62,31 @@ export async function exportDeckFromProducts({
   const pptx = new PptxGenJS();
   (pptx as any).layout = "LAYOUT_16x9";
 
-  /* ---------- Cover slides ---------- */
+  /* --- COVER 1 --- */
   {
     const s = pptx.addSlide();
-    s.background = { path: "/cover-bg-1.png" };
-    tx(s, client.projectName || "Project Selection", { ...COVER.title, fontSize: 34, bold: true, color: COLOR_TEXT });
-    tx(s, `Prepared for ${client.clientName || "Client"}`, { ...COVER.sub, fontSize: 16, color: COLOR_SUB });
-    tx(s, client.dateISO ? new Date(client.dateISO).toLocaleDateString() : new Date().toLocaleDateString(),
-      { ...COVER.date, fontSize: 12, color: COLOR_MUTED });
-  }
-  {
-    const s = pptx.addSlide();
-    s.background = { path: "/cover-bg-2.png" };
-    tx(s, client.projectName || "Project Selection", { ...COVER.title, fontSize: 28, bold: true, color: COLOR_TEXT });
+    s.addImage({ path: "/cover-bg-1.png", x: 0, y: 0, w: "100%", h: "100%" });
+    tx(s, client.projectName || "Project Selection", { x: 0.8, y: 1.0, w: 11.5, fontSize: 34, bold: true, color: COLOR_TEXT });
+    tx(s, `Prepared for ${client.clientName || "Client"}`, { x: 0.8, y: 1.7, w: 11.5, fontSize: 16, color: COLOR_SUB });
+    tx(s, client.dateISO ? new Date(client.dateISO).toLocaleDateString() : new Date().toLocaleDateString(), { x: 0.8, y: 2.1, w: 11.5, fontSize: 12, color: COLOR_MUTED });
   }
 
-  /* ---------- Product slides ---------- */
+  /* --- COVER 2 --- */
+  {
+    const s = pptx.addSlide();
+    s.addImage({ path: "/cover-bg-2.png", x: 0, y: 0, w: "100%", h: "100%" });
+    tx(s, client.projectName || "Project Selection", { x: 0.8, y: 1.0, w: 11.5, fontSize: 28, bold: true, color: COLOR_TEXT });
+    tx(s, `Prepared for ${client.clientName || "Client"}`, { x: 0.8, y: 1.7, w: 11.5, fontSize: 16, color: COLOR_SUB });
+  }
+
+  /* --- PRODUCT SLIDES --- */
   for (const raw of products) {
-    const productName = String((raw as any).name ?? "Product");
+    const productName = String((raw as any).name ?? (raw as any).product ?? "Product");
     const productCode = String((raw as any).code ?? "");
-    const imageUrl = String((raw as any).imageurl ?? "");
-    const pdfUrl = String((raw as any).pdfurl ?? "");
+    const imageUrl    = String((raw as any).image ?? (raw as any).imageurl ?? "");
+    const pdfUrl      = String((raw as any).pdfurl ?? "");
     const description = String((raw as any).description ?? "");
-
-    const contactFooter = [client.contactName, client.contactEmail, client.contactPhone]
-      .filter(Boolean).join("   |   ");
+    const specsBullets = (raw as any).specs as string[] | undefined;
 
     const s = pptx.addSlide();
 
@@ -117,32 +98,33 @@ export async function exportDeckFromProducts({
       } catch {}
     }
 
-    // right PDF first page
+    // right specs
+    let specsDrawn = false;
     if (pdfUrl) {
       try {
         const png = await renderPdfFirstPageToDataUrl(viaProxy(pdfUrl)!, 1200);
         s.addImage({ data: strip(png), ...PRODUCT.specs, sizing: { type: "contain", w: PRODUCT.specs.w, h: PRODUCT.specs.h } });
+        specsDrawn = true;
       } catch {}
     }
+    if (!specsDrawn && specsBullets && specsBullets.length) {
+      tx(s, specsBullets.map((b) => `• ${b}`).join("\n"), { x: PRODUCT.specs.x, y: PRODUCT.specs.y, w: PRODUCT.specs.w, h: PRODUCT.specs.h, fontSize: 12, color: COLOR_SUB });
+    }
 
-    // title
-    tx(s, productName, { ...PRODUCT.title, fontSize: autoTitleSize(productName), bold: true, color: COLOR_TEXT });
-    if (description) tx(s, description, { ...PRODUCT.desc, fontSize: 12, color: COLOR_DESC });
-    if (productCode) tx(s, productCode, { ...PRODUCT.code, fontSize: 11, color: COLOR_TEXT });
-    if (contactFooter) tx(s, contactFooter, { ...PRODUCT.footer.text, fontSize: 10, color: "FFFFFF" });
-    s.addShape(pptx.ShapeType.rect, { ...PRODUCT.footer.bar, fill: { color: COLOR_FOOTER }, line: { color: COLOR_FOOTER } });
+    // title / desc / code
+    tx(s, productName, { ...PRODUCT.title, fontSize: autoTitleSize(productName), bold: true, color: COLOR_TEXT, align: "center" });
+    if (description) tx(s, description, { ...PRODUCT.desc, fontSize: 12, color: COLOR_SUB, align: "center" });
+    if (productCode) tx(s, productCode, { ...PRODUCT.code, fontSize: 11, color: COLOR_TEXT, align: "center" });
   }
 
-  /* ---------- Closing slides ---------- */
+  /* --- END SLIDES (BLANK BACKGROUNDS) --- */
   {
     const s = pptx.addSlide();
-    s.background = { path: "/end-bg-1.png" };
-    tx(s, "Thank you", { x: 1, y: 2, w: 10, fontSize: 32, bold: true, color: COLOR_TEXT, align: "center" });
+    s.addImage({ path: "/end-bg-1.png", x: 0, y: 0, w: "100%", h: "100%" });
   }
   {
     const s = pptx.addSlide();
-    s.background = { path: "/end-bg-2.png" };
-    tx(s, "Contact us: info@pacificbathroom.com.au", { x: 1, y: 3, w: 10, fontSize: 20, color: COLOR_SUB, align: "center" });
+    s.addImage({ path: "/end-bg-2.png", x: 0, y: 0, w: "100%", h: "100%" });
   }
 
   await pptx.writeFile({ fileName: `${client.projectName || "Project Selection"}.pptx` });
