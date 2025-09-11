@@ -17,7 +17,7 @@ export default function ProductCard({ product, onSelect }: Props) {
         </div>
         {product.description && <p className="text-sm text-slate-600 line-clamp-2">{product.description}</p>}
         <div className="flex flex-wrap gap-1 pt-1">
-          {product.tags?.slice(0,3).map(t => <Tag key={t}>{t}</Tag>)}
+          {product.tags?.slice(0,3).map(t: string) => <Tag key={t}>{t}</Tag>)}
         </div>
       </div>
     </button>
