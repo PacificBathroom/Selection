@@ -1,25 +1,66 @@
-import React from 'react';
-import { Product } from '../types';
-import Tag from './Tag';
+// src/components/ProductCard.tsx
+import React from "react";
+import type { Product } from "../types";
 
-type Props = { product: Product; onSelect: (p: Product) => void; };
+type Props = {
+  product: Product;
+  onSelect?: (p: Product) => void;
+};
 
-export default function ProductCard({ product, onSelect }: Props) {
+const ProductCard: React.FC<Props> = ({ product, onSelect }) => {
+  const title = product.product || "Untitled";
+  const sku = product.sku ? String(product.sku) : "";
+  const category = product.category ? String(product.category) : "";
+  const price =
+    product.price != null && String(product.price).trim() !== ""
+      ? typeof product.price === "number"
+        ? `$${product.price.toFixed(2)}`
+        : String(product.price)
+      : "";
+
   return (
-    <button onClick={() => onSelect(product)} className="group text-left w-full rounded-2xl bg-white border shadow-card overflow-hidden hover:shadow-lg transition">
-      <div className="aspect-[4/3] w-full overflow-hidden">
-        {product.image ? (<img src={product.image} alt={product.name} className="h-full w-full object-cover group-hover:scale-[1.02] transition" />) : (<div className="h-full w-full bg-slate-100 flex items-center justify-center text-slate-400 text-sm">No image</div>)}
-      </div>
-      <div className="p-4 space-y-2">
-        <div className="flex items-center justify-between">
-          <h3 className="font-semibold leading-tight">{product.name}</h3>
-          {product.code && <span className="text-xs text-slate-500">{product.code}</span>}
+    <div className="border rounded-2xl p-3 flex gap-3 hover:shadow">
+      {/* Thumbnail */}
+      {product.thumbnail ? (
+        <img
+          src={String(product.thumbnail)}
+          alt={title}
+          className="w-24 h-24 object-cover rounded-xl"
+          loading="lazy"
+        />
+      ) : (
+        <div className="w-24 h-24 bg-slate-100 rounded-xl" />
+      )}
+
+      {/* Details */}
+      <div className="flex-1 min-w-0">
+        <div className="font-medium truncate">{title}</div>
+
+        <div className="text-xs text-slate-500 space-x-2">
+          {sku && <span>SKU: {sku}</span>}
+          {category && <span>Category: {category}</span>}
         </div>
-        {product.description && <p className="text-sm text-slate-600 line-clamp-2">{product.description}</p>}
-        <div className="flex flex-wrap gap-1 pt-1">
-          {product.tags?.slice(0,3).map(t: string) => <Tag key={t}>{t}</Tag>)}
-        </div>
+
+        {price && <div className="mt-1 font-semibold">{price}</div>}
+
+        {product.description ? (
+          <p className="mt-1 text-sm text-slate-700 line-clamp-2">
+            {String(product.description)}
+          </p>
+        ) : null}
+
+        {onSelect ? (
+          <button
+            type="button"
+            className="mt-2 text-sm px-3 py-1 rounded-lg border hover:bg-slate-50"
+            onClick={() => onSelect(product)}
+          >
+            Select
+          </button>
+        ) : null}
       </div>
-    </button>
+    </div>
   );
-}
+};
+
+export default ProductCard;
