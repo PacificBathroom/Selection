@@ -146,16 +146,23 @@ export default function ProductGallery({ client, range }: Props) {
                   />
                 </div>
 
-                {p.thumbnail ? (
-                  <img
-                    src={String(p.thumbnail)}
-                    alt={title}
-                    className="w-24 h-24 object-cover rounded-xl"
-                    loading="lazy"
-                  />
-                ) : (
-                  <div className="w-24 h-24 bg-slate-100 rounded-xl" />
-                )}
+               const thumb =
+  (p as any).thumbnail ||
+  (p as any).imageurl ||
+  (p as any).image ||
+  "";
+
+{thumb ? (
+  <img
+    src={String(thumb)}
+    alt={title}
+    className="w-24 h-24 object-cover rounded-xl"
+    loading="lazy"
+  />
+) : (
+  <div className="w-24 h-24 bg-slate-100 rounded-xl" />
+)}
+
 
                 <div className="flex-1 min-w-0">
                   <div className="font-medium truncate">{title}</div>
