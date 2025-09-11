@@ -80,9 +80,11 @@ export async function exportDeckFromProducts({
     objects: [{ image: { path: "/end-bg-2.png", x: 0, y: 0, w: "100%", h: "100%" } }],
   });
   pptx.defineSlideMaster({
-    title: "PRODUCT",
-    objects: [{ rect: { x: 0, y: 0, w: "100%", h: "100%", fill: "FFFFFF" } }], // plain white bg
-  });
+  title: "PRODUCT",
+  background: { color: "FFFFFF" }, // ✅ use background instead of a rect w/ fill
+  objects: [],
+});
+
 
   /* --- COVER 1 --- */
   {
