@@ -1,4 +1,8 @@
-import PptxGenJS, { TableRow, TableCell } from 'pptxgenjs';
+ // Types aren’t exported in this build; use default export and loose typing
+ // @ts-ignore
+ import PptxGenJS from 'pptxgenjs';
+type TableRow = any;
+ type TableCell = any;
 import { renderPdfFirstPageToDataUrl } from '../utils/pdfPreview';
 import type { Section, Product, ClientInfo } from '../types';
 
