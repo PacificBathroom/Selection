@@ -3,6 +3,42 @@
 import PptxGenJS from "pptxgenjs";
 import { renderPdfFirstPageToDataUrl } from "../utils/pdfPreview";
 import type { ClientInfo, Product } from "../types";
+// Put these near the top of src/utils/pptExporter.ts
+
+// Base64 that works in browser (pptx export runs client-side)
+const toB64 = (s: string) => {
+  try {
+    // handle unicode safely
+    return btoa(unescape(encodeURIComponent(s)));
+  } catch {
+    // very old browsers
+    // @ts-ignore
+    return window.btoa(s);
+  }
+};
+
+/** Route any external URL through our Netlify proxy using BASE64 (no encoding issues) */
+const viaProxy = (u?: string | null) => {
+  const s = (u ?? "").toString().trim();
+  if (!s) return undefined;
+  if (!/^https?:\/\//i.test(s)) return undefined; // ignore non-absolute URLs
+  return `/api/pdf-proxy?url_b64=${toB64(s)}`;
+};
+
+// fetch → data:URL, still going through proxy
+async function urlToDataUrl(u: string): Promise<string> {
+  const proxied = viaProxy(u);
+  if (!proxied) throw new Error("Bad URL");
+  const res = await fetch(proxied, { credentials: "omit" });
+  if (!res.ok) throw new Error(`Fetch failed: ${res.status}`);
+  const blob = await res.blob();
+  return await new Promise<string>((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(String(fr.result));
+    fr.onerror = reject;
+    fr.readAsDataURL(blob);
+  });
+}
 
 const viaProxy = (u?: string | null) =>
   u && /^https?:\/\//i.test(u) ? `/api/pdf-proxy?url=${encodeURIComponent(u)}` : u || undefined;
