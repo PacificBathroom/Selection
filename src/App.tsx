@@ -1,3 +1,4 @@
+// src/App.tsx
 import React, { useState } from "react";
 import Header from "./components/Header";
 import ProjectDetailsCard from "./components/ProjectDetailsCard";
@@ -16,10 +17,15 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#f7f9fc]">
-      <Header />
+      {/* Top header */}
+      <Header client={client} setClient={setClient} />
+
       <main className="mx-auto max-w-7xl px-4 py-6 space-y-6">
+        {/* Project info card (where you type client details) */}
         <ProjectDetailsCard client={client} setClient={setClient} />
-        <ProductGallery />
+
+        {/* Gallery now has access to client info for export */}
+        <ProductGallery client={client} />
       </main>
     </div>
   );
