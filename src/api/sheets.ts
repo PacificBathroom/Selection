@@ -1,6 +1,18 @@
 // src/api/sheets.ts
 import type { Product } from "../types";
 
+// 👇 add this export so legacy files keep working
+export type ProductRow = Product;
+
+export async function fetchProducts(params?: {
+  q?: string;
+  category?: string;
+  range?: string;
+}): Promise<Product[]> {
+  // ...existing code unchanged...
+}
+
+
 export async function fetchProducts(params?: {
   q?: string;
   category?: string;
