@@ -3,29 +3,19 @@
 import PptxGenJS from "pptxgenjs";
 import { renderPdfFirstPageToDataUrl } from "../utils/pdfPreview";
 import type { ClientInfo, Product } from "../types";
-// Put these near the top of src/utils/pptExporter.ts
 
-// Base64 that works in browser (pptx export runs client-side)
+/* ---------- helpers: base64 proxy + fetch-to-dataURL (single copy) ---------- */
 const toB64 = (s: string) => {
-  try {
-    // handle unicode safely
-    return btoa(unescape(encodeURIComponent(s)));
-  } catch {
-    // very old browsers
-    // @ts-ignore
-    return window.btoa(s);
-  }
+  try { return btoa(unescape(encodeURIComponent(s))); }
+  catch { return window.btoa(s as any); }
 };
 
-/** Route any external URL through our Netlify proxy using BASE64 (no encoding issues) */
 const viaProxy = (u?: string | null) => {
   const s = (u ?? "").toString().trim();
-  if (!s) return undefined;
-  if (!/^https?:\/\//i.test(s)) return undefined; // ignore non-absolute URLs
+  if (!s || !/^https?:\/\//i.test(s)) return undefined;
   return `/api/pdf-proxy?url_b64=${toB64(s)}`;
 };
 
-// fetch → data:URL, still going through proxy
 async function urlToDataUrl(u: string): Promise<string> {
   const proxied = viaProxy(u);
   if (!proxied) throw new Error("Bad URL");
@@ -40,22 +30,9 @@ async function urlToDataUrl(u: string): Promise<string> {
   });
 }
 
-const viaProxy = (u?: string | null) =>
-  u && /^https?:\/\//i.test(u) ? `/api/pdf-proxy?url=${encodeURIComponent(u)}` : u || undefined;
-
-async function urlToDataUrl(u: string): Promise<string> {
-  const res = await fetch(viaProxy(u)!, { credentials: "omit" });
-  if (!res.ok) throw new Error(`Fetch failed ${res.status} for ${u}`);
-  const blob = await res.blob();
-  return await new Promise<string>((resolve, reject) => {
-    const fr = new FileReader();
-    fr.onload = () => resolve(String(fr.result));
-    fr.onerror = reject;
-    fr.readAsDataURL(blob);
-  });
-}
 const strip = (d: string) => d.replace(/^data:[^;]+;base64,/, "");
 
+/* ------------------------------ exporter ------------------------------ */
 export async function exportDeckFromProducts({
   client,
   products,
@@ -65,7 +42,7 @@ export async function exportDeckFromProducts({
 }) {
   const pptx = new PptxGenJS();
 
-  // Safe A4 across versions
+  // A4 across versions
   let set = false;
   try { (pptx as any).layout = "LAYOUT_A4"; set = true; } catch {}
   if (!set) { try { (pptx as any).layout = "A4"; set = true; } catch {} }
@@ -74,7 +51,7 @@ export async function exportDeckFromProducts({
     (pptx as any).layout = "A4";
   }
 
-  // ---------- Cover ----------
+  // Cover
   {
     const slide = pptx.addSlide();
     slide.addText("SELECTION DECK", { x: 0.5, y: 0.45, w: 7.3, fontSize: 12, bold: true, color: "666666" });
@@ -84,14 +61,14 @@ export async function exportDeckFromProducts({
     slide.addImage({ path: "/logo.png", x: 1.65, y: 2.7, w: 5.0, h: 2.3 });
   }
 
+  // Product slides
   for (const raw of products) {
-    // Map your sheet columns
     const productName = String((raw as any).product ?? (raw as any).name ?? "Product");
     const productCode = String((raw as any).sku ?? (raw as any).code ?? "");
     const imageUrl = String((raw as any).thumbnail ?? (raw as any).imageurl ?? (raw as any).image ?? "");
     const pdfUrl = String((raw as any).pdf_url ?? (raw as any).pdfurl ?? "");
     const description = String((raw as any).description ?? "");
-    const specsBullets = (raw as any).specs as string[] | undefined; // from SpecsBullets column
+    const specsBullets = (raw as any).specs as string[] | undefined;
     const contactName = String((raw as any).contact_name ?? client.contactName ?? "");
     const contactDetails = [
       (raw as any).contact_email ?? client.contactEmail ?? "",
@@ -100,7 +77,7 @@ export async function exportDeckFromProducts({
 
     const slide = pptx.addSlide();
 
-    // IMAGE (left)
+    // Image (left)
     const imgX = 0.6, imgY = 0.8, imgW = 4.2, imgH = 3.5;
     if (imageUrl) {
       try {
@@ -113,7 +90,7 @@ export async function exportDeckFromProducts({
       slide.addShape(pptx.ShapeType.rect, { x: imgX, y: imgY, w: imgW, h: imgH, line: { color: "C7D2FE" }, fill: { color: "F8FAFC" } });
     }
 
-    // SPECS (right) — try PDF preview first; else bullets; else placeholder
+    // Specs (right): prefer PDF page; fallback to bullets; else placeholder
     const specsX = 5.1, specsY = 0.8, specsW = 2.6, specsH = 3.5;
     let specsShown = false;
     if (pdfUrl) {
@@ -135,21 +112,21 @@ export async function exportDeckFromProducts({
       slide.addShape(pptx.ShapeType.rect, { x: specsX, y: specsY, w: specsW, h: specsH, line: { color: "C7D2FE" }, fill: { color: "F8FAFC" } });
     }
 
-    // NAME box (center)
+    // Name box (center)
     slide.addShape(pptx.ShapeType.rect, { x: 2.0, y: 4.55, w: 4.0, h: 0.85, line: { color: "9CA3AF" }, fill: { color: "FFFFFF" } });
     slide.addText(productName, { x: 2.1, y: 4.67, w: 3.8, fontSize: 16, bold: true, color: "0F172A", align: "center" });
 
-    // DESCRIPTION bullet (under name)
+    // Description
     if (description) {
       slide.addText(`• ${description}`, { x: 2.1, y: 5.50, w: 3.8, fontSize: 12, color: "374151" });
     }
 
-    // PRODUCT CODE (left gutter)
+    // Product code (left gutter)
     if (productCode) {
       slide.addText(productCode, { x: 0.6, y: 4.50, w: 1.3, fontSize: 11, color: "0F172A" });
     }
 
-    // BLUE FOOTER with contact
+    // Footer (blue) with contact
     slide.addShape(pptx.ShapeType.rect, { x: 0.5, y: 6.5, w: 7.3, h: 0.35, fill: { color: "1D4ED8" }, line: { color: "1D4ED8" } });
     const footer = [contactName, contactDetails].filter(Boolean).join("      ");
     if (footer) slide.addText(footer, { x: 0.7, y: 6.56, w: 6.9, fontSize: 10, color: "FFFFFF" });
