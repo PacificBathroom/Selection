@@ -97,7 +97,7 @@ export async function exportDeckPptx({ client, sections }: ExportArgs) {
   // Count slides
   const allProducts: { sectionIndex: number; product: Product; sectionTitle: string }[] = [];
   sections.forEach((s, idx) => {
-    (s.products || []).forEach((p) => allProducts.push({ sectionIndex: idx, product: p, sectionTitle: s.title || '' }));
+    (s.products || []).forEach((p: any) => allProducts.push({ sectionIndex: idx, product: p, sectionTitle: s.title || '' }));
   });
 
   // ------------- Product slides (one per product) -------------
