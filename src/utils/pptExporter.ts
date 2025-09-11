@@ -1,11 +1,9 @@
 // src/utils/pptExporter.ts
-
-// @ts-ignore - pptxgenjs ships default export in this build
+// @ts-ignore
 import PptxGenJS from "pptxgenjs";
 import { renderPdfFirstPageToDataUrl } from "../utils/pdfPreview";
 import type { ClientInfo, Product } from "../types";
 
-/** If URL is external, route via our proxy to avoid CORS issues */
 const viaProxy = (u?: string | null) =>
   u && /^https?:\/\//i.test(u) ? `/api/pdf-proxy?url=${encodeURIComponent(u)}` : u || undefined;
 
@@ -22,7 +20,6 @@ async function urlToDataUrl(u: string): Promise<string> {
 }
 const strip = (d: string) => d.replace(/^data:[^;]+;base64,/, "");
 
-/** Export slides directly from a flat list of products (no sections) */
 export async function exportDeckFromProducts({
   client,
   products,
@@ -32,136 +29,94 @@ export async function exportDeckFromProducts({
 }) {
   const pptx = new PptxGenJS();
 
-// Make A4 work across pptxgenjs versions
-// 1) try built-in constant, 2) try plain "A4", 3) define custom layout
-let set = false;
-try {
-  (pptx as any).layout = "LAYOUT_A4";
-  set = true;
-} catch {}
-if (!set) {
-  try {
+  // Safe A4 across versions
+  let set = false;
+  try { (pptx as any).layout = "LAYOUT_A4"; set = true; } catch {}
+  if (!set) { try { (pptx as any).layout = "A4"; set = true; } catch {} }
+  if (!set && (pptx as any).defineLayout) {
+    (pptx as any).defineLayout({ name: "A4", width: 8.27, height: 11.69 });
     (pptx as any).layout = "A4";
-    set = true;
-  } catch {}
-}
-if (!set && (pptx as any).defineLayout) {
-  (pptx as any).defineLayout({ name: "A4", width: 8.27, height: 11.69 });
-  (pptx as any).layout = "A4";
-}
-
+  }
 
   // ---------- Cover ----------
   {
     const slide = pptx.addSlide();
-    slide.addText("SELECTION DECK", { x: 0.5, y: 0.4, w: 7.3, fontSize: 12, bold: true, color: "666666" });
-    slide.addText(client.projectName || "Project Selection", { x: 0.5, y: 0.9, w: 7.3, fontSize: 32, bold: true, color: "0F172A" });
-    slide.addText(`Prepared for ${client.clientName || "Client name"}`, { x: 0.5, y: 1.6, w: 7.3, fontSize: 14, color: "334155" });
-    const dateStr = client.dateISO ? new Date(client.dateISO).toLocaleDateString() : new Date().toLocaleDateString();
-    slide.addText(dateStr, { x: 0.5, y: 1.95, w: 7.3, fontSize: 12, color: "64748B" });
+    slide.addText("SELECTION DECK", { x: 0.5, y: 0.45, w: 7.3, fontSize: 12, bold: true, color: "666666" });
+    slide.addText(client.projectName || "Project Selection", { x: 0.5, y: 0.95, w: 7.3, fontSize: 32, bold: true, color: "0F172A" });
+    slide.addText(`Prepared for ${client.clientName || "Client name"}`, { x: 0.5, y: 1.65, w: 7.3, fontSize: 14, color: "334155" });
+    slide.addText(client.dateISO ? new Date(client.dateISO).toLocaleDateString() : new Date().toLocaleDateString(), { x: 0.5, y: 2.0, w: 7.3, fontSize: 12, color: "64748B" });
     slide.addImage({ path: "/logo.png", x: 1.65, y: 2.7, w: 5.0, h: 2.3 });
   }
 
-  // ---------- One slide per product ----------
-  for (const p of products) {
+  for (const raw of products) {
+    // Map your sheet columns
+    const productName = String((raw as any).product ?? (raw as any).name ?? "Product");
+    const productCode = String((raw as any).sku ?? (raw as any).code ?? "");
+    const imageUrl = String((raw as any).thumbnail ?? (raw as any).imageurl ?? (raw as any).image ?? "");
+    const pdfUrl = String((raw as any).pdf_url ?? (raw as any).pdfurl ?? "");
+    const description = String((raw as any).description ?? "");
+    const specsBullets = (raw as any).specs as string[] | undefined; // from SpecsBullets column
+    const contactName = String((raw as any).contact_name ?? client.contactName ?? "");
+    const contactDetails = [
+      (raw as any).contact_email ?? client.contactEmail ?? "",
+      (raw as any).contact_phone ?? client.contactPhone ?? "",
+    ].filter(Boolean).join("  |  ");
+
     const slide = pptx.addSlide();
 
-    // Map your sheet columns to variables (with safe fallbacks)
-    const productName = String((p.product ?? p.name ?? "Product") || "");
-    const productCode = String(p.code ?? p.Code ?? p.sku ?? "");
-    const imageUrl = (p.thumbnail as string) || (p.Image as string) || (p.image as string) || "";
-    const pdfUrl = (p["pdf_url"] as string) || (p["PDF URL"] as string) || (p.specPdfUrl as string) || "";
-    const description = String((p.description ?? p.Description ?? "") || "");
-    const contactName = String((p["Contact Name"] ?? p.contact_name ?? "") || "");
-    const contactDetails = String((p["Contact Details"] ?? "") || "");
-
-    // --- Layout like your mock ---
-    // Top: IMAGE_BOX (left) and SPECS preview (right)
-    const imgLeftX = 0.6;
-    const imgTopY = 0.8;
-    const imgW = 4.2;
-    const imgH = 3.5;
-
+    // IMAGE (left)
+    const imgX = 0.6, imgY = 0.8, imgW = 4.2, imgH = 3.5;
     if (imageUrl) {
       try {
         const dataUrl = await urlToDataUrl(imageUrl);
-        slide.addImage({ data: strip(dataUrl), x: imgLeftX, y: imgTopY, w: imgW, h: imgH, sizing: { type: "contain", w: imgW, h: imgH } });
-      } catch {}
+        slide.addImage({ data: strip(dataUrl), x: imgX, y: imgY, w: imgW, h: imgH, sizing: { type: "contain", w: imgW, h: imgH } });
+      } catch {
+        slide.addShape(pptx.ShapeType.rect, { x: imgX, y: imgY, w: imgW, h: imgH, line: { color: "C7D2FE" }, fill: { color: "F8FAFC" } });
+      }
     } else {
-      // light placeholder box so it still looks structured
-      slide.addShape(pptx.ShapeType.rect, {
-        x: imgLeftX,
-        y: imgTopY,
-        w: imgW,
-        h: imgH,
-        line: { color: "C7D2FE" },
-        fill: { color: "F8FAFC" },
-      });
-      slide.addText("[[IMAGE_BOX]]", { x: imgLeftX + 0.15, y: imgTopY + 0.15, fontSize: 10, color: "9CA3AF" });
+      slide.addShape(pptx.ShapeType.rect, { x: imgX, y: imgY, w: imgW, h: imgH, line: { color: "C7D2FE" }, fill: { color: "F8FAFC" } });
     }
 
-    // Right: SPECS = first page of PDF
-    const specsX = 5.1;
-    const specsY = 0.8;
-    const specsW = 2.6;
-    const specsH = 3.5;
-
+    // SPECS (right) — try PDF preview first; else bullets; else placeholder
+    const specsX = 5.1, specsY = 0.8, specsW = 2.6, specsH = 3.5;
+    let specsShown = false;
     if (pdfUrl) {
       try {
         const png = await renderPdfFirstPageToDataUrl(viaProxy(pdfUrl)!, 1200);
         slide.addImage({ data: strip(png), x: specsX, y: specsY, w: specsW, h: specsH, sizing: { type: "contain", w: specsW, h: specsH } });
-      } catch {
-        slide.addShape(pptx.ShapeType.rect, { x: specsX, y: specsY, w: specsW, h: specsH, line: { color: "C7D2FE" }, fill: { color: "F8FAFC" } });
-        slide.addText("([[SPECS]])", { x: specsX + 0.15, y: specsY + 0.15, fontSize: 10, color: "9CA3AF" });
-      }
-    } else {
+        specsShown = true;
+      } catch {}
+    }
+    if (!specsShown && specsBullets && specsBullets.length) {
+      slide.addShape(pptx.ShapeType.rect, { x: specsX, y: specsY, w: specsW, h: specsH, line: { color: "C7D2FE" }, fill: { color: "FFFFFF" } });
+      slide.addText(
+        specsBullets.map((b) => `• ${b}`).join("\n"),
+        { x: specsX + 0.15, y: specsY + 0.15, w: specsW - 0.3, h: specsH - 0.3, fontSize: 11, color: "334155" }
+      );
+      specsShown = true;
+    }
+    if (!specsShown) {
       slide.addShape(pptx.ShapeType.rect, { x: specsX, y: specsY, w: specsW, h: specsH, line: { color: "C7D2FE" }, fill: { color: "F8FAFC" } });
-      slide.addText("([[SPECS]])", { x: specsX + 0.15, y: specsY + 0.15, fontSize: 10, color: "9CA3AF" });
     }
 
-    // Product name in a box centered-ish (like your mock)
-    slide.addShape(pptx.ShapeType.rect, {
-      x: 2.0,
-      y: 4.5,
-      w: 4.0,
-      h: 0.85,
-      line: { color: "9CA3AF" },
-      fill: { color: "FFFFFF" },
-    });
-    slide.addText(productName, { x: 2.1, y: 4.62, w: 3.8, fontSize: 16, bold: true, color: "0F172A", align: "center" });
+    // NAME box (center)
+    slide.addShape(pptx.ShapeType.rect, { x: 2.0, y: 4.55, w: 4.0, h: 0.85, line: { color: "9CA3AF" }, fill: { color: "FFFFFF" } });
+    slide.addText(productName, { x: 2.1, y: 4.67, w: 3.8, fontSize: 16, bold: true, color: "0F172A", align: "center" });
 
-    // Description bullets under the name box
+    // DESCRIPTION bullet (under name)
     if (description) {
-      slide.addText(`• ${description}`, { x: 2.1, y: 5.45, w: 3.8, fontSize: 12, color: "374151" });
+      slide.addText(`• ${description}`, { x: 2.1, y: 5.50, w: 3.8, fontSize: 12, color: "374151" });
     }
 
-    // Left gutter: PRODUCT_CODE
+    // PRODUCT CODE (left gutter)
     if (productCode) {
-      slide.addText(productCode, { x: 0.6, y: 4.45, w: 1.3, fontSize: 11, color: "0F172A" });
+      slide.addText(productCode, { x: 0.6, y: 4.50, w: 1.3, fontSize: 11, color: "0F172A" });
     }
 
-    // Bottom blue bar with contact name + contact details
-    slide.addShape(pptx.ShapeType.rect, {
-      x: 0.5,
-      y: 6.5,
-      w: 7.3,
-      h: 0.35,
-      fill: { color: "1D4ED8" }, // brand blue
-      line: { color: "1D4ED8" },
-    });
-
-    const bottomText = [
-      contactName || client.contactName || "",
-      contactDetails || [client.contactEmail, client.contactPhone].filter(Boolean).join("  |  "),
-    ];
-
-    slide.addText(bottomText.filter(Boolean).join("      "), {
-      x: 0.7,
-      y: 6.56,
-      w: 6.9,
-      fontSize: 10,
-      color: "FFFFFF",
-    });
+    // BLUE FOOTER with contact
+    slide.addShape(pptx.ShapeType.rect, { x: 0.5, y: 6.5, w: 7.3, h: 0.35, fill: { color: "1D4ED8" }, line: { color: "1D4ED8" } });
+    const footer = [contactName, contactDetails].filter(Boolean).join("      ");
+    if (footer) slide.addText(footer, { x: 0.7, y: 6.56, w: 6.9, fontSize: 10, color: "FFFFFF" });
   }
 
   await pptx.writeFile({ fileName: `${client.projectName || "Project Selection"}.pptx` });
