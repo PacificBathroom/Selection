@@ -31,7 +31,25 @@ export async function exportDeckFromProducts({
   products: Product[];
 }) {
   const pptx = new PptxGenJS();
-  pptx.layout = "A4"; // 8.27 x 11.69 in
+
+// Make A4 work across pptxgenjs versions
+// 1) try built-in constant, 2) try plain "A4", 3) define custom layout
+let set = false;
+try {
+  (pptx as any).layout = "LAYOUT_A4";
+  set = true;
+} catch {}
+if (!set) {
+  try {
+    (pptx as any).layout = "A4";
+    set = true;
+  } catch {}
+}
+if (!set && (pptx as any).defineLayout) {
+  (pptx as any).defineLayout({ name: "A4", width: 8.27, height: 11.69 });
+  (pptx as any).layout = "A4";
+}
+
 
   // ---------- Cover ----------
   {
