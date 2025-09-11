@@ -3,6 +3,17 @@ import Header from './components/Header';
 import SectionsDeck from './components/SectionsDeck';
 import FrontPage from './components/FrontPage';
 import { Section, ClientInfo } from './types';
+import ProductGallery from "./components/ProductGallery";
+
+export default function App() {
+  return (
+    <div>
+      {/* your header / nav … */}
+      <ProductGallery />
+    </div>
+  );
+}
+
 
 export default function App() {
   const [sections, setSections] = useState<Section[]>([
