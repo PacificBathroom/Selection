@@ -5,18 +5,18 @@ import { renderPdfFirstPageToDataUrl } from "../utils/pdfPreview";
 import type { ClientInfo, Product } from "../types";
 
 /* =========================
-   THEME — tweak to taste
+   THEME
    ========================= */
-const FONT = "Calibri";                  // primary font (PowerPoint machines usually have this)
-const COLOR_BG = "FFFFFF";               // slide background
-const COLOR_TEXT = "0F172A";             // main text (slate)
-const COLOR_SUB = "334155";              // subtitle
-const COLOR_MUTED = "64748B";            // small meta text
-const COLOR_FOOTER = "0B3C8C";           // Bryant-like deeper blue footer (adjust if needed)
-const COLOR_GUIDE = "C7D2FE";            // light outlines for boxes
-const COLOR_DESC = "374151";             // description text
+const FONT = "Calibri";                  // primary
+const COLOR_BG = "FFFFFF";
+const COLOR_TEXT = "0F172A";
+const COLOR_SUB = "334155";
+const COLOR_MUTED = "64748B";
+const COLOR_FOOTER = "0B3C8C";           // adjust if needed
+const COLOR_GUIDE = "C7D2FE";
+const COLOR_DESC = "374151";
 
-// Element coordinates for 16:9 (13.33" x 7.5")
+// 16:9 coords (13.33 x 7.5 inches)
 const COVER = {
   title:   { x: 0.6, y: 1.0, w: 12.1 },
   sub:     { x: 0.6, y: 1.8, w: 12.1 },
@@ -32,10 +32,6 @@ const PRODUCT = {
   code:    { x: 0.6, y: 6.4,  w: 2.0 },
   footer:  { bar: { x: 0.5, y: 6.9, w: 12.3, h: 0.35 }, text: { x: 0.7, y: 6.95, w: 12.0 } },
 };
-
-// Calibri everywhere helper
-const addText = (slide: any, text: string, opts: any) =>
-  slide.addText(text, { fontFace: FONT, ...opts });
 
 /* =========================
    Proxy + fetch helpers
@@ -65,7 +61,13 @@ async function urlToDataUrl(u: string): Promise<string> {
 const strip = (d: string) => d.replace(/^data:[^;]+;base64,/, "");
 
 /* =========================
-   Exporter (Bryant-style)
+   text helper (avoid name clash)
+   ========================= */
+const tx = (slide: any, text: string, opts: any) =>
+  slide.addText(text, { fontFace: FONT, ...opts });
+
+/* =========================
+   Exporter
    ========================= */
 export async function exportDeckFromProducts({
   client,
@@ -73,7 +75,7 @@ export async function exportDeckFromProducts({
 }: { client: ClientInfo; products: Product[] }) {
   const pptx = new PptxGenJS();
 
-  // Force 16:9 landscape (fallback defines custom)
+  // Landscape 16:9
   let layoutSet = false;
   try { (pptx as any).layout = "LAYOUT_16x9"; layoutSet = true; } catch {}
   if (!layoutSet && (pptx as any).defineLayout) {
@@ -83,15 +85,15 @@ export async function exportDeckFromProducts({
   }
   if (!layoutSet) { (pptx as any).layout = "LAYOUT_WIDE"; }
 
-  // Masters (TypeScript-friendly keys: rect/text/image/etc.)
+  // Masters (valid keys: rect/text/image/line/chart/placeholder)
   pptx.defineSlideMaster({
     title: "COVER",
     background: { color: COLOR_BG },
     objects: [
-      { text: { text: "SELECTION DECK", options: { ...COVER.title, y: 0.5, fontSize: 12, bold: true, color: "666666", fontFace: FONT } } },
-      { text: { text: "<<TITLE>>",      options: { ...COVER.title, fontSize: 38, bold: true, color: COLOR_TEXT, fontFace: FONT } } },
-      { text: { text: "<<SUB>>",        options: { ...COVER.sub,   fontSize: 16, color: COLOR_SUB,   fontFace: FONT } } },
-      { text: { text: "<<DATE>>",       options: { ...COVER.date,  fontSize: 12, color: COLOR_MUTED, fontFace: FONT } } },
+      { text: { text: "SELECTION DECK", options: { x: 0.6, y: 0.5, w: 12.1, fontSize: 12, bold: true, color: "666666", fontFace: FONT } } },
+      { text: { text: "<<TITLE>>",      options: { ...COVER.title, fontSize: 38, bold: true, color: COLOR_TEXT,  fontFace: FONT } } },
+      { text: { text: "<<SUB>>",        options: { ...COVER.sub,   fontSize: 16, color: COLOR_SUB,               fontFace: FONT } } },
+      { text: { text: "<<DATE>>",       options: { ...COVER.date,  fontSize: 12, color: COLOR_MUTED,             fontFace: FONT } } },
     ],
   });
 
@@ -99,22 +101,21 @@ export async function exportDeckFromProducts({
     title: "PRODUCT",
     background: { color: COLOR_BG },
     objects: [
-      // footer bar
       { rect: { ...PRODUCT.footer.bar, line: { color: COLOR_FOOTER }, fill: { color: COLOR_FOOTER } } },
-      // guide boxes (nice even if images fail)
-      { rect: { ...PRODUCT.img,   line: { color: COLOR_GUIDE }, fill: { color: "F8FAFC" } } },
-      { rect: { ...PRODUCT.specs, line: { color: COLOR_GUIDE }, fill: { color: "FFFFFF" } } },
-      { rect: { ...PRODUCT.titleBox, line: { color: "9CA3AF" }, fill: { color: "FFFFFF" } } },
+      { rect: { ...PRODUCT.img,        line: { color: COLOR_GUIDE },  fill: { color: "F8FAFC" } } },
+      { rect: { ...PRODUCT.specs,      line: { color: COLOR_GUIDE },  fill: { color: "FFFFFF" } } },
+      { rect: { ...PRODUCT.titleBox,   line: { color: "9CA3AF"   },   fill: { color: "FFFFFF" } } },
     ],
     slideNumber: { x: 0.15, y: 7.1, color: "9CA3AF", fontSize: 10 },
   });
 
-  // Cover
+  // Cover slide
   {
     const s = pptx.addSlide({ masterName: "COVER" });
-    addText(s, client.projectName || "Project Selection", COVER.title,);
-    addText(s, `Prepared for ${client.clientName || "Client name"}`, COVER.sub);
-    addText(
+    tx(s, client.projectName || "Project Selection", COVER.title);
+    tx(s, `Prepared for ${client.clientName || "Client name"}`, COVER.sub);
+    tx(
+      s,
       client.dateISO ? new Date(client.dateISO).toLocaleDateString() : new Date().toLocaleDateString(),
       COVER.date
     );
@@ -123,7 +124,6 @@ export async function exportDeckFromProducts({
 
   // Product slides
   for (const raw of products) {
-    // Map your column names verbatim (with sensible fallbacks)
     const productName   = String((raw as any).name ?? (raw as any).product ?? "Product");
     const productCode   = String((raw as any).code ?? (raw as any).sku ?? "");
     const imageUrl      = String((raw as any).imageurl ?? (raw as any).image ?? (raw as any).thumbnail ?? "");
@@ -144,53 +144,39 @@ export async function exportDeckFromProducts({
     if (imageUrl) {
       try {
         const dataUrl = await urlToDataUrl(imageUrl);
-        s.addImage({
-          data: strip(dataUrl),
-          ...PRODUCT.img,
-          sizing: { type: "contain", w: PRODUCT.img.w, h: PRODUCT.img.h },
-        });
-      } catch { /* leave guide box visible */ }
+        s.addImage({ data: strip(dataUrl), ...PRODUCT.img, sizing: { type: "contain", w: PRODUCT.img.w, h: PRODUCT.img.h } });
+      } catch { /* leave guide box */ }
     }
 
-    // Right specs: render PDF page first; else bullets
+    // Right specs: PDF page OR bullets
     let specsDrawn = false;
     if (pdfUrl) {
       try {
         const png = await renderPdfFirstPageToDataUrl(viaProxy(pdfUrl)!, 1400);
-        s.addImage({
-          data: strip(png),
-          ...PRODUCT.specs,
-          sizing: { type: "contain", w: PRODUCT.specs.w, h: PRODUCT.specs.h },
-        });
+        s.addImage({ data: strip(png), ...PRODUCT.specs, sizing: { type: "contain", w: PRODUCT.specs.w, h: PRODUCT.specs.h } });
         specsDrawn = true;
       } catch { /* fall back */ }
     }
     if (!specsDrawn && specsBullets && specsBullets.length) {
-      addText(s, specsBullets.map((b) => `• ${b}`).join("\n"), {
+      tx(s, specsBullets.map((b) => `• ${b}`).join("\n"), {
         x: PRODUCT.specs.x + 0.15, y: PRODUCT.specs.y + 0.15,
         w: PRODUCT.specs.w - 0.3,  h: PRODUCT.specs.h - 0.3,
-        fontSize: 12, color: "334155",
+        fontSize: 12, color: COLOR_SUB,
       });
     }
 
-    // Title in box (auto-size a bit for long names)
+    // Title in box (auto-size for long names)
     const size = Math.min(22, Math.max(16, 26 - Math.max(0, productName.length - 36) * 0.3));
-    addText(s, productName, { ...PRODUCT.title, fontSize: size, bold: true, color: COLOR_TEXT, align: "center" });
+    tx(s, productName, { ...PRODUCT.title, fontSize: size, bold: true, color: COLOR_TEXT, align: "center" });
 
     // Description centered
-    if (description) {
-      addText(s, `• ${description}`, { ...PRODUCT.desc, fontSize: 12, color: COLOR_DESC, align: "center" });
-    }
+    if (description) tx(s, `• ${description}`, { ...PRODUCT.desc, fontSize: 12, color: COLOR_DESC, align: "center" });
 
-    // Product code (left-bottom above footer)
-    if (productCode) {
-      addText(s, productCode, { ...PRODUCT.code, fontSize: 11, color: COLOR_TEXT });
-    }
+    // Product code (left-bottom)
+    if (productCode) tx(s, productCode, { ...PRODUCT.code, fontSize: 11, color: COLOR_TEXT });
 
-    // Footer contact
-    if (contactFooter) {
-      addText(s, contactFooter, { ...PRODUCT.footer.text, fontSize: 10, color: "FFFFFF" });
-    }
+    // Footer contact (on blue bar)
+    if (contactFooter) tx(s, contactFooter, { ...PRODUCT.footer.text, fontSize: 10, color: "FFFFFF" });
   }
 
   await pptx.writeFile({ fileName: `${client.projectName || "Project Selection"}.pptx` });
