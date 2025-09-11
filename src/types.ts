@@ -19,14 +19,6 @@ export type Product = {
   assets?: Asset[];
 };
 
-export type Section = {
-  id: string;
-  title: string;
-  // new multi-product model (legacy single 'product' still tolerated in SectionSlide)
-  products?: Product[];
-  product?: Product;
-};
-
 export type ClientInfo = {
   projectName: string;
   clientName: string;
