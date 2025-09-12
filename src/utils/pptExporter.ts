@@ -7,40 +7,77 @@ import type { ClientInfo, Product } from "../types";
 /* ===== STYLE ===== */
 const FONT = "Calibri";
 const COLOR_TEXT = "0F172A";
-const COLOR_SUB  = "334155";
-const COLOR_MUTED= "64748B";
-const COLOR_FOOTER = "40E0D0"; // turquoise footer on product slides
+const COLOR_SUB = "334155";
+const COLOR_MUTED = "64748B";
+const COLOR_FOOTER = "40E0D0"; // turquoise
 
 /* ===== GEOMETRY (16:9) =====
-   Slide size is ~13.33 x 7.5 inches */
+   Slide size ~13.33 x 7.5 inches */
 const PRODUCT = {
-  img:   { x: 0.5, y: 0.7, w: 5.8, h: 3.9 },  // made smaller & higher
-  specs: { x: 6.6, y: 0.7, w: 5.9, h: 3.9 },  // made smaller & higher
-  title: { x: 0.7, y: 4.8, w: 11.9 },         // moved up
-  desc:  { x: 0.7, y: 5.35, w: 11.9 },        // moved up
-  code:  { x: 0.7, y: 5.9, w: 11.9 },         // moved up
+  img:   { x: 0.5, y: 0.7, w: 5.8, h: 3.9 },
+  specs: { x: 6.6, y: 0.7, w: 5.9, h: 3.9 },
+  title: { x: 0.7, y: 4.8, w: 11.9 },
+  desc:  { x: 0.7, y: 5.35, w: 11.9 },
+  code:  { x: 0.7, y: 5.9, w: 11.9 },
   footer:{ bar:{ x:0, y:6.95, w:"100%", h:0.35 }, text:{ x:1.5, y:7.0, w:11 } }
 };
 
+/* ===== HELPERS ===== */
 const tx = (s: any, t: string, o: any) => {
   if (!t) return;
   s.addText(t, {
     fontFace: FONT,
-    // “Autoshrink” (supported by pptxgenjs) – keeps text inside the box:
-    autoFit: true,
-    // Trim para spacing to avoid pushing down:
-    paraSpaceAfter: 0,
+    autoFit: true,       // keep text inside box
+    paraSpaceAfter: 0,   // avoid pushing content down
     ...o,
   });
 };
 
 const strip = (d: string) => d.replace(/^data:[^;]+;base64,/, "");
 
-/** Proxy any external URL via our Netlify function */
+// Normalise Drive/Google links to direct file bytes
+function normalizeUrl(u?: string | null): string | undefined {
+  if (!u) return undefined;
+  const s = String(u).trim();
+  if (!s) return undefined;
+
+  // https://drive.google.com/file/d/FILE_ID/view?usp=sharing
+  const m1 = s.match(/https:\/\/drive\.google\.com\/file\/d\/([^/]+)\//i);
+  if (m1 && m1[1]) return `https://drive.google.com/uc?export=download&id=${m1[1]}`;
+
+  // https://drive.google.com/open?id=FILE_ID
+  const m2 = s.match(/https:\/\/drive\.google\.com\/open\?id=([^&]+)/i);
+  if (m2 && m2[1]) return `https://drive.google.com/uc?export=download&id=${m2[1]}`;
+
+  // https://lh3.googleusercontent.com/d/FILE_ID
+  const m3 = s.match(/https:\/\/lh3\.googleusercontent\.com\/d\/([^/?#]+)/i);
+  if (m3 && m3[1]) return `https://lh3.googleusercontent.com/d/${m3[1]}`;
+
+  // Dropbox ?dl=0 -> dl=1 (optional)
+  if (/^https:\/\/www\.dropbox\.com\//i.test(s)) {
+    const url = new URL(s);
+    url.searchParams.set("dl", "1");
+    return url.toString();
+  }
+
+  return s; // unchanged
+}
+
+// base64 helper (browser + Node safe)
+const toB64 = (str: string) => {
+  try {
+    // @ts-ignore
+    return (typeof Buffer !== "undefined" ? Buffer.from(str, "utf8").toString("base64") : btoa(str));
+  } catch {
+    return str; // last resort
+  }
+};
+
+// Proxy any external URL using base64 param
 const viaProxy = (u?: string | null) => {
-  const s = (u ?? "").toString().trim();
-  if (!s || !/^https?:\/\//i.test(s)) return undefined;
-  return `/api/pdf-proxy?url=${encodeURIComponent(s)}`;
+  const norm = normalizeUrl(u);
+  if (!norm || !/^https?:\/\//i.test(norm)) return undefined;
+  return `/api/pdf-proxy?url_b64=${toB64(norm)}`;
 };
 
 async function fetchAsDataUrl(u: string): Promise<string> {
@@ -63,8 +100,22 @@ const autoTitleSize = (name: string) => {
   if (len <= 36) return 22;
   if (len <= 48) return 20;
   if (len <= 60) return 18;
-  return 16; // extra long names
+  return 16; // very long names
 };
+
+function trimDesc(s?: string, max = 280) {
+  if (!s) return "";
+  const t = s.replace(/\s+/g, " ").trim();
+  return t.length > max ? t.slice(0, max).trimEnd() + "…" : t;
+}
+
+// Helper to safely read multiple alias keys from a row
+const get = (obj: any, keys: string[], fallback = "") =>
+  String(
+    keys
+      .map((k) => obj?.[k] ?? obj?.[k.toLowerCase()] ?? obj?.[k.replace(/\s+/g, "")])
+      .find((v) => v != null) ?? fallback
+  );
 
 /* ===== EXPORTER ===== */
 export async function exportDeckFromProducts({
@@ -74,7 +125,7 @@ export async function exportDeckFromProducts({
   const pptx = new PptxGenJS();
   (pptx as any).layout = "LAYOUT_16x9";
 
-  /* === MASTER SLIDES (lock backgrounds) === */
+  /* === MASTER SLIDES (locked backgrounds) === */
   pptx.defineSlideMaster({
     title: "COVER1",
     objects: [{ image: { path: "/cover-bg-1.png", x: 0, y: 0, w: "100%", h: "100%" } }],
@@ -93,7 +144,7 @@ export async function exportDeckFromProducts({
   });
   pptx.defineSlideMaster({
     title: "PRODUCT",
-    background: { color: "FFFFFF" }, // cleaner than a full-bleed rect
+    background: { color: "FFFFFF" }, // simpler than a full-bleed rect
     objects: [],
   });
 
@@ -106,24 +157,21 @@ export async function exportDeckFromProducts({
     tx(s, `Prepared for ${client.clientName || "Client"}`, {
       x: 0.8, y: 1.7, w: 11.5, fontSize: 16, color: COLOR_SUB,
     });
-    tx(
-      s,
+    tx(s,
       client.dateISO ? new Date(client.dateISO).toLocaleDateString() : new Date().toLocaleDateString(),
       { x: 0.8, y: 2.1, w: 11.5, fontSize: 12, color: COLOR_MUTED }
     );
-    // Contact on cover 1 as well
     tx(s, client.contactName || "", { x: 0.8, y: 2.6, w: 11.5, fontSize: 14, color: COLOR_TEXT });
     const details = [client.contactEmail, client.contactPhone].filter(Boolean).join(" · ");
     tx(s, details, { x: 0.8, y: 3.0, w: 11.5, fontSize: 12, color: COLOR_SUB });
   }
 
-  /* --- COVER 2 (contact info instead of client) --- */
+  /* --- COVER 2 (contact info focus) --- */
   {
     const s = pptx.addSlide({ masterName: "COVER2" });
     tx(s, client.projectName || "Project Selection", {
       x: 0.8, y: 1.0, w: 11.5, fontSize: 28, bold: true, color: COLOR_TEXT,
     });
-    // Contact block (replaces “Prepared for Client” on cover 2)
     tx(s, client.contactName || "", { x: 0.8, y: 1.7, w: 11.5, fontSize: 16, color: COLOR_SUB });
     const details2 = [client.contactEmail, client.contactPhone].filter(Boolean).join(" · ");
     tx(s, details2, { x: 0.8, y: 2.1, w: 11.5, fontSize: 12, color: COLOR_MUTED });
@@ -131,22 +179,17 @@ export async function exportDeckFromProducts({
 
   /* --- PRODUCT SLIDES --- */
   for (const raw of products) {
-    // Robust header aliasing so images/specs resolve regardless of sheet header case/naming
-    const get = (obj: any, keys: string[], fallback = "") =>
-      String(keys.map(k => obj?.[k] ?? obj?.[k.toLowerCase()] ?? obj?.[k.replace(/\s+/g, "")]).find(v => v != null) ?? fallback);
-
-    const productName = get(raw, ["Name","Product"]);
-    const productCode = get(raw, ["Code","SKU","Product Code"]);
-    const imageUrl    = get(raw, ["Image","ImageURL","Image Url","imagebox","image_box","Thumbnail"]);
-    const pdfUrl      = get(raw, ["PdfURL","PDF URL","Specs PDF","Spec","SpecsUrl"]);
-    const description = get(raw, ["Description","Product Description"]);
-    // If you have a bullet column named "Specs" with comma- or newline-separated text:
-    const specsStr    = get(raw, ["Specs","Specifications"], "");
+    const productName = get(raw, ["Name", "Product"]);
+    const productCode = get(raw, ["Code", "SKU", "Product Code"]);
+    const imageUrl    = get(raw, ["Image", "ImageURL", "Image Url", "imagebox", "image_box", "Thumbnail"]);
+    const pdfUrl      = get(raw, ["PdfURL", "PDF URL", "Specs PDF", "Spec", "SpecsUrl"]);
+    const description = get(raw, ["Description", "Product Description"]);
+    const specsStr    = get(raw, ["Specs", "Specifications"], "");
     const specsBullets = specsStr ? specsStr.split(/\r?\n|,|•/).map(s => s.trim()).filter(Boolean) : undefined;
 
     const s = pptx.addSlide({ masterName: "PRODUCT" });
 
-    // Left image (through proxy so CORS never blocks)
+    // Left image (via proxy)
     if (imageUrl) {
       try {
         const d = await fetchAsDataUrl(imageUrl);
@@ -155,10 +198,10 @@ export async function exportDeckFromProducts({
           ...PRODUCT.img,
           sizing: { type: "contain", w: PRODUCT.img.w, h: PRODUCT.img.h },
         });
-      } catch { /* silently continue */ }
+      } catch { /* continue without image */ }
     }
 
-    // Right specs: prefer PDF first page; fall back to bullets
+    // Right specs: PDF first page -> fallback to bullets
     let specsDrawn = false;
     if (pdfUrl) {
       try {
@@ -178,22 +221,20 @@ export async function exportDeckFromProducts({
       });
     }
 
-    // Title / desc / code (with autoshrink)
-    tx(s, productName || "Product", {
+    // Title / description / code (autoshrink + trimmed desc)
+    const titleText = productName || "Product";
+    tx(s, titleText, {
       ...PRODUCT.title,
-      fontSize: autoTitleSize(productName || "Product"),
+      fontSize: autoTitleSize(titleText),
       bold: true,
       color: COLOR_TEXT,
       align: "center",
     });
-    if (description) tx(s, description, {
-      ...PRODUCT.desc, fontSize: 12, color: COLOR_SUB, align: "center",
-    });
-    if (productCode) tx(s, productCode, {
-      ...PRODUCT.code, fontSize: 11, color: COLOR_TEXT, align: "center",
-    });
+    const desc = trimDesc(description, 280);
+    if (desc) tx(s, desc, { ...PRODUCT.desc, fontSize: 12, color: COLOR_SUB, align: "center" });
+    if (productCode) tx(s, productCode, { ...PRODUCT.code, fontSize: 11, color: COLOR_TEXT, align: "center" });
 
-    // Turquoise footer bar (logo + tag)
+    // Footer bar (turquoise)
     s.addShape(pptx.ShapeType.rect, {
       ...PRODUCT.footer.bar,
       fill: { color: COLOR_FOOTER },
@@ -205,7 +246,7 @@ export async function exportDeckFromProducts({
     });
   }
 
-  /* --- END SLIDES (blank) --- */
+  /* --- END SLIDES --- */
   pptx.addSlide({ masterName: "END1" });
   pptx.addSlide({ masterName: "END2" });
 
