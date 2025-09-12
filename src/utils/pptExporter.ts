@@ -4,74 +4,58 @@ import PptxGenJS from "pptxgenjs";
 import { renderPdfFirstPageToDataUrl } from "../utils/pdfPreview";
 import type { ClientInfo, Product } from "../types";
 
-/* ========= THEME ========= */
+/* ===== THEME ===== */
 const FONT = "Calibri";
 const COLOR_TEXT = "0F172A";
 const COLOR_SUB = "334155";
 const COLOR_MUTED = "64748B";
 const COLOR_FOOTER = "40E0D0"; // turquoise
 
-/* ========= GEOMETRY (16:9) =========
-   Slide default is ~13.33 x 7.5 inches in pptxgenjs */
+/* ===== GEOMETRY (16:9 ~ 13.33x7.5in) ===== */
 const SLIDE_W = 13.33;
 
 const PRODUCT = {
-  img:   { x: 0.5, y: 0.7, w: 5.8,  h: 3.9 }, // smaller & higher
-  specs: { x: 6.6, y: 0.7, w: 5.9,  h: 3.9 }, // smaller & higher
-  title: { x: 0.7, y: 4.8, w: 11.9 },
+  img:   { x: 0.5, y: 0.7,  w: 5.8,  h: 3.9 }, // smaller & higher
+  specs: { x: 6.6, y: 0.7,  w: 5.9,  h: 3.9 },
+  title: { x: 0.7, y: 4.8,  w: 11.9 },
   desc:  { x: 0.7, y: 5.35, w: 11.9 },
   code:  { x: 0.7, y: 5.9,  w: 11.9 },
-  footer:{ bar:{ x:0, y:6.95, w: SLIDE_W, h:0.35 }, text:{ x:1.5, y:7.0, w:11 } }
+  footer:{ bar:{ x: 0,  y: 6.95, w: SLIDE_W, h: 0.35 }, text:{ x: 1.5, y: 7.0, w: 11 } }
 };
 
-/* ========= HELPERS ========= */
+/* ===== HELPERS ===== */
 const tx = (s: any, t: string | undefined, o: any) => {
   if (!t) return;
-  s.addText(t, {
-    fontFace: FONT,
-    autoFit: true,       // keep text inside its box
-    paraSpaceAfter: 0,   // avoid pushing content down
-    ...o,
-  });
+  s.addText(t, { fontFace: FONT, autoFit: true, paraSpaceAfter: 0, ...o });
 };
 
 const strip = (d: string) => d.replace(/^data:[^;]+;base64,/, "");
 
-/** Google Drive sharing URL -> direct file URL */
+/** Google Drive "view" URL -> direct file URL */
 function normalizeUrl(u?: string | null): string | undefined {
   if (!u) return undefined;
   const s = String(u).trim();
   if (!s) return undefined;
-
-  // https://drive.google.com/file/d/FILE_ID/view?...
   const m = s.match(/https:\/\/drive\.google\.com\/file\/d\/([^/]+)\//i);
-  if (m && m[1]) {
-    const id = m[1];
-    return `https://drive.google.com/uc?export=download&id=${id}`;
-  }
-
-  // Often fine as-is: https://lh3.googleusercontent.com/d/FILE_ID
+  if (m?.[1]) return `https://drive.google.com/uc?export=download&id=${m[1]}`;
   return s;
 }
 
-/** Base64 for URLs, safe in both browser & Node bundling */
+/** Base64 for URLs (browser + node-safe) */
 function toB64Url(str: string): string {
   try {
-    // Browser
     // eslint-disable-next-line no-undef
     return btoa(unescape(encodeURIComponent(str)));
   } catch {
     try {
-      // Node/polyfilled
-      // eslint-disable-next-line no-undef
       return Buffer.from(str, "utf8").toString("base64");
     } catch {
-      return str; // worst-case fallback (proxy will reject invalid)
+      return str;
     }
   }
 }
 
-/** Proxy any external URL via Netlify function using base64 param */
+/** Use Netlify proxy with base64 param */
 const viaProxy = (u?: string | null): string | undefined => {
   const norm = normalizeUrl(u);
   if (!norm || !/^https?:\/\//i.test(norm)) return undefined;
@@ -98,7 +82,7 @@ const autoTitleSize = (name: string) => {
   if (len <= 36) return 22;
   if (len <= 48) return 20;
   if (len <= 60) return 18;
-  return 16; // very long names
+  return 16;
 };
 
 function trimDesc(s?: string, max = 280) {
@@ -119,7 +103,7 @@ function pick(obj: any, labels: string[], fallback = ""): string {
   return fallback;
 }
 
-/* ========= EXPORTER ========= */
+/* ===== EXPORTER ===== */
 export async function exportDeckFromProducts({
   client,
   products,
@@ -127,7 +111,7 @@ export async function exportDeckFromProducts({
   const pptx = new PptxGenJS();
   (pptx as any).layout = "LAYOUT_16x9";
 
-  /* === MASTER SLIDES (locked backgrounds) === */
+  /* Master slides (locked backgrounds) */
   pptx.defineSlideMaster({
     title: "COVER1",
     objects: [{ image: { path: "/cover-bg-1.png", x: 0, y: 0, w: "100%", h: "100%" } }],
@@ -146,11 +130,11 @@ export async function exportDeckFromProducts({
   });
   pptx.defineSlideMaster({
     title: "PRODUCT",
-    background: { color: "FFFFFF" }, // clean canvas
+    background: { color: "FFFFFF" },
     objects: [],
   });
 
-  /* --- COVER 1 --- */
+  /* Cover 1 */
   {
     const s = pptx.addSlide({ masterName: "COVER1" });
     tx(s, client.projectName || "Project Selection", {
@@ -164,27 +148,25 @@ export async function exportDeckFromProducts({
       client.dateISO ? new Date(client.dateISO).toLocaleDateString() : new Date().toLocaleDateString(),
       { x: 0.8, y: 2.1, w: 11.5, fontSize: 12, color: COLOR_MUTED }
     );
-    // Contact block on cover 1
+    // Contact block
     tx(s, client.contactName || "", { x: 0.8, y: 2.6, w: 11.5, fontSize: 14, color: COLOR_TEXT });
     const details = [client.contactEmail, client.contactPhone].filter(Boolean).join(" · ");
     tx(s, details, { x: 0.8, y: 3.0, w: 11.5, fontSize: 12, color: COLOR_SUB });
   }
 
-  /* --- COVER 2 (contact info instead of "Prepared for Client") --- */
+  /* Cover 2 (contact-focused) */
   {
     const s = pptx.addSlide({ masterName: "COVER2" });
     tx(s, client.projectName || "Project Selection", {
       x: 0.8, y: 1.0, w: 11.5, fontSize: 28, bold: true, color: COLOR_TEXT,
     });
-    // Contact replaces the client line
     tx(s, client.contactName || "", { x: 0.8, y: 1.7, w: 11.5, fontSize: 16, color: COLOR_SUB });
     const details2 = [client.contactEmail, client.contactPhone].filter(Boolean).join(" · ");
     tx(s, details2, { x: 0.8, y: 2.1, w: 11.5, fontSize: 12, color: COLOR_MUTED });
   }
 
-  /* --- PRODUCT SLIDES --- */
+  /* Product slides */
   for (const raw of products) {
-    // Tolerant header mapping (works with many variants)
     const productName = pick(raw, ["Name", "Product"], "Product");
     const productCode = pick(raw, ["Code", "SKU", "Product Code"], "");
     const imageUrl    = pick(raw, ["Image", "ImageURL", "Image Url", "imagebox", "image_box", "Thumbnail"], "");
@@ -195,7 +177,7 @@ export async function exportDeckFromProducts({
 
     const s = pptx.addSlide({ masterName: "PRODUCT" });
 
-    // Left: product image (through proxy)
+    // Image
     if (imageUrl) {
       try {
         const d = await fetchAsDataUrl(imageUrl);
@@ -204,10 +186,10 @@ export async function exportDeckFromProducts({
           ...PRODUCT.img,
           sizing: { type: "contain", w: PRODUCT.img.w, h: PRODUCT.img.h },
         });
-      } catch { /* ignore if fetch fails */ }
+      } catch {}
     }
 
-    // Right: specs PDF first page OR bullet fallback
+    // Specs: PDF preview or bullets
     let specsDrawn = false;
     if (pdfUrl) {
       try {
@@ -218,7 +200,7 @@ export async function exportDeckFromProducts({
           sizing: { type: "contain", w: PRODUCT.specs.w, h: PRODUCT.specs.h },
         });
         specsDrawn = true;
-      } catch { /* fall back below */ }
+      } catch {}
     }
     if (!specsDrawn && specsBullets?.length) {
       tx(s, specsBullets.map((b) => `• ${b}`).join("\n"), {
@@ -227,26 +209,20 @@ export async function exportDeckFromProducts({
       });
     }
 
-    // Title / description / code (autoshrink + trimmed desc)
+    // Title / description / code
     const title = productName || "Product";
     tx(s, title, {
-      ...PRODUCT.title,
-      fontSize: autoTitleSize(title),
-      bold: true,
-      color: COLOR_TEXT,
-      align: "center",
+      ...PRODUCT.title, fontSize: autoTitleSize(title), bold: true, color: COLOR_TEXT, align: "center",
     });
 
     const desc = trimDesc(description, 280);
     if (desc) tx(s, desc, { ...PRODUCT.desc, fontSize: 12, color: COLOR_SUB, align: "center" });
 
-    if (productCode) tx(s, productCode, {
-      ...PRODUCT.code, fontSize: 11, color: COLOR_TEXT, align: "center",
-    });
+    if (productCode) tx(s, productCode, { ...PRODUCT.code, fontSize: 11, color: COLOR_TEXT, align: "center" });
 
-    // Turquoise footer bar (logo + tag) — product slides only
-    s.addShape(PptxGenJS.ShapeType.rect, {
-      ...PRODUCT.footer.bar, // w is numeric (TS safe)
+    // Footer bar (use string "rect" so it works on all pptxgenjs versions)
+    s.addShape("rect", {
+      ...PRODUCT.footer.bar,
       fill: { color: COLOR_FOOTER },
     });
     s.addImage({ path: "/logo.png", x: 0.3, y: 7.0, w: 1.0, h: 0.3 });
@@ -256,7 +232,7 @@ export async function exportDeckFromProducts({
     });
   }
 
-  /* --- END SLIDES (background only) --- */
+  /* End slides (background only) */
   pptx.addSlide({ masterName: "END1" });
   pptx.addSlide({ masterName: "END2" });
 
