@@ -1,69 +1,89 @@
-// src/utils/pptExporter.ts
 // @ts-ignore
 import PptxGenJS from "pptxgenjs";
 import { renderPdfFirstPageToDataUrl } from "../utils/pdfPreview";
 import type { ClientInfo, Product } from "../types";
 
-/* ===== THEME ===== */
+/* ===== Theme ===== */
 const FONT = "Calibri";
 const COLOR_TEXT = "0F172A";
 const COLOR_SUB = "334155";
 const COLOR_MUTED = "64748B";
 const COLOR_FOOTER = "40E0D0"; // turquoise
 
-/* ===== GEOMETRY (16:9 ~ 13.33x7.5in) ===== */
+/* ===== Geometry (16:9 ~ 13.33x7.5in) ===== */
 const SLIDE_W = 13.33;
 
 const PRODUCT = {
-  img:   { x: 0.5, y: 0.7,  w: 5.8,  h: 3.9 }, // smaller & higher
-  specs: { x: 6.6, y: 0.7,  w: 5.9,  h: 3.9 },
-  title: { x: 0.7, y: 4.8,  w: 11.9 },
-  desc:  { x: 0.7, y: 5.35, w: 11.9 },
-  code:  { x: 0.7, y: 5.9,  w: 11.9 },
+  img:   { x: 0.5, y: 0.65, w: 5.8,  h: 3.9 },
+  specs: { x: 6.6, y: 0.65, w: 5.9,  h: 3.9 },
+  title: { x: 0.75, y: 4.75, w: 11.9, h: 0.5 },
+  desc:  { x: 0.75, y: 5.25, w: 11.9, h: 0.7 },
+  code:  { x: 0.75, y: 5.95, w: 11.9, h: 0.4 },
   footer:{ bar:{ x: 0,  y: 6.95, w: SLIDE_W, h: 0.35 }, text:{ x: 1.5, y: 7.0, w: 11 } }
 };
 
-/* ===== HELPERS ===== */
+/* ===== Helpers ===== */
 const tx = (s: any, t: string | undefined, o: any) => {
   if (!t) return;
-  s.addText(t, { fontFace: FONT, autoFit: true, paraSpaceAfter: 0, ...o });
+  s.addText(t, {
+    fontFace: FONT,
+    autoFit: true,
+    margin: 0,
+    paraSpaceAfter: 0,
+    paraSpaceBefore: 0,
+    ...o,
+  });
 };
 
 const strip = (d: string) => d.replace(/^data:[^;]+;base64,/, "");
 
-/** Google Drive "view" URL -> direct file URL */
+/** Support many Drive & Googleusercontent URL shapes */
 function normalizeUrl(u?: string | null): string | undefined {
-  if (!u) return undefined;
-  const s = String(u).trim();
-  if (!s) return undefined;
-  const m = s.match(/https:\/\/drive\.google\.com\/file\/d\/([^/]+)\//i);
+  if (!u) return;
+  let s = String(u).trim();
+  if (!s) return;
+
+  // Handle “sharing” links like .../file/d/<id>/view?usp=sharing
+  let m = s.match(/https:\/\/drive\.google\.com\/file\/d\/([^/]+)\//i);
   if (m?.[1]) return `https://drive.google.com/uc?export=download&id=${m[1]}`;
-  return s;
-}
 
-/** Base64 for URLs (browser + node-safe) */
-function toB64Url(str: string): string {
-  try {
-    // eslint-disable-next-line no-undef
-    return btoa(unescape(encodeURIComponent(str)));
-  } catch {
-    try {
-      return Buffer.from(str, "utf8").toString("base64");
-    } catch {
-      return str;
-    }
+  // open?id=<id>
+  m = s.match(/[?&]id=([^&]+)/i);
+  if (m?.[1] && /drive\.google\.com/i.test(s)) {
+    return `https://drive.google.com/uc?export=download&id=${m[1]}`;
   }
+
+  // Docs “uc” links are fine as-is
+  if (/https:\/\/drive\.google\.com\/uc\?/.test(s)) return s;
+
+  // lh3.googleusercontent direct file links are fine
+  if (/^https:\/\/(?:lh\d+|googleusercontent)\.googleusercontent\.com/i.test(s)) return s;
+
+  // Generic: leave other https URLs alone
+  if (/^https?:\/\//i.test(s)) return s;
+
+  return undefined;
 }
 
-/** Use Netlify proxy with base64 param */
-const viaProxy = (u?: string | null): string | undefined => {
+/** Base64 that works in browser/Node */
+function toB64Url(str: string): string {
+  try { return btoa(unescape(encodeURIComponent(str))); }
+  catch { try { return Buffer.from(str, "utf8").toString("base64"); } catch { return str; } }
+}
+
+/** Absolute proxy URL (pptxgenjs can be picky) */
+function proxyUrl(u?: string | null): string | undefined {
   const norm = normalizeUrl(u);
-  if (!norm || !/^https?:\/\//i.test(norm)) return undefined;
-  return `/api/pdf-proxy?url_b64=${toB64Url(norm)}`;
-};
+  if (!norm) return;
+  const base = (typeof window !== "undefined" && window.location?.origin)
+    ? window.location.origin
+    : "";
+  const p = `/api/pdf-proxy?url_b64=${toB64Url(norm)}`;
+  return base ? new URL(p, base).toString() : p;
+}
 
 async function fetchAsDataUrl(u: string): Promise<string> {
-  const proxied = viaProxy(u);
+  const proxied = proxyUrl(u);
   if (!proxied) throw new Error("Bad URL");
   const res = await fetch(proxied, { credentials: "omit" });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -85,7 +105,7 @@ const autoTitleSize = (name: string) => {
   return 16;
 };
 
-function trimDesc(s?: string, max = 280) {
+function trimDesc(s?: string, max = 220) {
   if (!s) return "";
   const t = s.replace(/\s+/g, " ").trim();
   return t.length > max ? t.slice(0, max).trimEnd() + "…" : t;
@@ -103,7 +123,7 @@ function pick(obj: any, labels: string[], fallback = ""): string {
   return fallback;
 }
 
-/* ===== EXPORTER ===== */
+/* ===== Exporter ===== */
 export async function exportDeckFromProducts({
   client,
   products,
@@ -111,7 +131,7 @@ export async function exportDeckFromProducts({
   const pptx = new PptxGenJS();
   (pptx as any).layout = "LAYOUT_16x9";
 
-  /* Master slides (locked backgrounds) */
+  /* Master slides */
   pptx.defineSlideMaster({
     title: "COVER1",
     objects: [{ image: { path: "/cover-bg-1.png", x: 0, y: 0, w: "100%", h: "100%" } }],
@@ -154,7 +174,7 @@ export async function exportDeckFromProducts({
     tx(s, details, { x: 0.8, y: 3.0, w: 11.5, fontSize: 12, color: COLOR_SUB });
   }
 
-  /* Cover 2 (contact-focused) */
+  /* Cover 2 (contact focused) */
   {
     const s = pptx.addSlide({ masterName: "COVER2" });
     tx(s, client.projectName || "Project Selection", {
@@ -177,7 +197,7 @@ export async function exportDeckFromProducts({
 
     const s = pptx.addSlide({ masterName: "PRODUCT" });
 
-    // Image
+    // Image (with logging if it fails)
     if (imageUrl) {
       try {
         const d = await fetchAsDataUrl(imageUrl);
@@ -186,41 +206,50 @@ export async function exportDeckFromProducts({
           ...PRODUCT.img,
           sizing: { type: "contain", w: PRODUCT.img.w, h: PRODUCT.img.h },
         });
-      } catch {}
+      } catch (e) {
+        console.warn("Image fetch failed:", imageUrl, e);
+        tx(s, "Image unavailable", {
+          x: PRODUCT.img.x, y: PRODUCT.img.y, w: PRODUCT.img.w, h: PRODUCT.img.h,
+          fontSize: 12, color: COLOR_MUTED, align: "center",
+        });
+      }
     }
 
-    // Specs: PDF preview or bullets
+    // Specs: first page of PDF or bullets
     let specsDrawn = false;
     if (pdfUrl) {
       try {
-        const png = await renderPdfFirstPageToDataUrl(viaProxy(pdfUrl)!, 1200);
+        const prox = proxyUrl(pdfUrl)!; // absolute proxy URL
+        const png = await renderPdfFirstPageToDataUrl(prox, 1000); // slightly smaller for speed & fit
         s.addImage({
           data: strip(png),
           ...PRODUCT.specs,
           sizing: { type: "contain", w: PRODUCT.specs.w, h: PRODUCT.specs.h },
         });
         specsDrawn = true;
-      } catch {}
+      } catch (e) {
+        console.warn("PDF preview failed:", pdfUrl, e);
+      }
     }
     if (!specsDrawn && specsBullets?.length) {
       tx(s, specsBullets.map((b) => `• ${b}`).join("\n"), {
         x: PRODUCT.specs.x, y: PRODUCT.specs.y, w: PRODUCT.specs.w, h: PRODUCT.specs.h,
-        fontSize: 12, color: COLOR_SUB,
+        fontSize: 11.5, color: COLOR_SUB,
       });
     }
 
-    // Title / description / code
+    // Title / description / code (autoFit + trimmed)
     const title = productName || "Product";
     tx(s, title, {
       ...PRODUCT.title, fontSize: autoTitleSize(title), bold: true, color: COLOR_TEXT, align: "center",
     });
 
-    const desc = trimDesc(description, 280);
-    if (desc) tx(s, desc, { ...PRODUCT.desc, fontSize: 12, color: COLOR_SUB, align: "center" });
+    const desc = trimDesc(description, 220);
+    if (desc) tx(s, desc, { ...PRODUCT.desc, fontSize: 11.5, color: COLOR_SUB, align: "center" });
 
     if (productCode) tx(s, productCode, { ...PRODUCT.code, fontSize: 11, color: COLOR_TEXT, align: "center" });
 
-    // Footer bar (use string "rect" so it works on all pptxgenjs versions)
+    // Footer bar (string "rect" for broad pptxgenjs support)
     s.addShape("rect", {
       ...PRODUCT.footer.bar,
       fill: { color: COLOR_FOOTER },
