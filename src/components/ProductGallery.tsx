@@ -1,23 +1,34 @@
 // src/components/ProductGallery.tsx
 import React, { useEffect, useMemo, useState } from "react";
-import type { ClientInfo } from "../types";
+import type { ClientInfo, Product } from "../types";
 import { fetchProducts } from "../api/sheets";
 import { exportDeckFromProducts } from "../utils/pptExporter";
 
 type Props = {
-  client: ClientInfo;      // pass from App/Header state
-  range?: string;          // optional: e.g. "Products!A1:Z"
+  client: ClientInfo;
+  range?: string; // e.g. "Products!A1:ZZ"
 };
 
+function productKey(p: any, i: number): string {
+  const cands = [
+    p.id, p._id, p._row, p.row, p.Row,
+    p.sku, p.SKU, p.code, p.Code,
+    p.url, p.Url, p.source_url, p.SourceURL,
+    p.imageurl, p.ImageURL, p.image,
+    p.name, p.Name, p.product, p.Product,
+  ];
+  const first = cands.find((v) => typeof v === "string" && v.trim() !== "");
+  return String(first ?? `idx#${i}`);
+}
+
 export default function ProductGallery({ client, range }: Props) {
-  // Use 'any' to preserve ALL original sheet columns (ImageURL, PdfURL, etc.)
-  const [items, setItems] = useState<any[]>([]);
+  const [items, setItems] = useState<Product[]>([]);
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("");
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
-  const [selected, setSelected] = useState<Record<string, any>>({});
+  const [selected, setSelected] = useState<Record<string, Product>>({});
   const [sortBy, setSortBy] = useState<"sheet" | "name" | "category">("sheet");
 
   useEffect(() => {
@@ -29,9 +40,8 @@ export default function ProductGallery({ client, range }: Props) {
     try {
       setLoading(true);
       setErrorMsg(null);
-      // IMPORTANT: fetchProducts should return raw rows (original headers)
       const res = await fetchProducts({ q: search, category, range });
-      setItems(res || []);
+      setItems(res);
     } catch (e: any) {
       console.error(e);
       setItems([]);
@@ -43,7 +53,7 @@ export default function ProductGallery({ client, range }: Props) {
 
   const categories = useMemo(() => {
     const s = new Set(
-      items.map((i) => String(i?.category || i?.Category || "").trim()).filter(Boolean)
+      items.map((i: any) => String(i.category || i.Category || "").trim()).filter(Boolean)
     );
     return Array.from(s).sort((a, b) => a.localeCompare(b));
   }, [items]);
@@ -51,28 +61,19 @@ export default function ProductGallery({ client, range }: Props) {
   const visibleItems = useMemo(() => {
     const arr = [...items];
     if (sortBy === "name") {
-      arr.sort((a, b) =>
-        String(a?.product || a?.Product || a?.name || "").localeCompare(
-          String(b?.product || b?.Product || b?.name || "")
-        )
+      arr.sort((a: any, b: any) =>
+        String(a.product || a.name || "").localeCompare(String(b.product || b.name || ""))
       );
     } else if (sortBy === "category") {
-      arr.sort((a, b) =>
-        String(a?.category || a?.Category || "").localeCompare(
-          String(b?.category || b?.Category || "")
-        )
+      arr.sort((a: any, b: any) =>
+        String(a.category || "").localeCompare(String(b.category || ""))
       );
     }
     return arr;
   }, [items, sortBy]);
 
-  const keyFor = (p: any, index: number) =>
-    String(
-      p?.sku ?? p?.SKU ?? p?.code ?? p?.Code ?? p?.product ?? p?.Product ?? index
-    );
-
-  const toggle = (p: any, index: number) => {
-    const key = keyFor(p, index);
+  const toggle = (p: Product, index: number) => {
+    const key = productKey(p as any, index);
     setSelected((prev) => {
       const next = { ...prev };
       if (next[key]) delete next[key];
@@ -90,7 +91,6 @@ export default function ProductGallery({ client, range }: Props) {
     }
     try {
       setExporting(true);
-      // CRITICAL: pass RAW rows directly; do not remap/destroy fields
       await exportDeckFromProducts({ client, products: selectedList });
     } catch (e: any) {
       console.error(e);
@@ -102,7 +102,7 @@ export default function ProductGallery({ client, range }: Props) {
 
   return (
     <section className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
-      {/* Controls */}
+      {/* controls */}
       <div className="flex flex-wrap gap-2 items-center mb-3">
         <input
           value={search}
@@ -118,17 +118,13 @@ export default function ProductGallery({ client, range }: Props) {
         >
           <option value="">All categories</option>
           {categories.map((c) => (
-            <option key={c} value={c}>
-              {c}
-            </option>
+            <option key={c} value={c}>{c}</option>
           ))}
         </select>
 
         <select
           value={sortBy}
-          onChange={(e) =>
-            setSortBy(e.target.value as "sheet" | "name" | "category")
-          }
+          onChange={(e) => setSortBy(e.target.value as "sheet" | "name" | "category")}
           className="border rounded-xl px-3 py-2 text-sm"
         >
           <option value="sheet">Sheet order</option>
@@ -160,7 +156,7 @@ export default function ProductGallery({ client, range }: Props) {
         </div>
       </div>
 
-      {/* Error / Empty / Grid */}
+      {/* grid */}
       {errorMsg ? (
         <div className="text-sm text-red-600">Error: {errorMsg}</div>
       ) : loading ? (
@@ -170,12 +166,11 @@ export default function ProductGallery({ client, range }: Props) {
       ) : (
         <ul className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
           {visibleItems.map((p, i) => {
-            const key = keyFor(p, i);
+            const key = productKey(p as any, i);
             const checked = Boolean(selected[key]);
-            const title = String(p?.product || p?.Product || p?.name || "Untitled");
-
+            const title = String((p as any).product || (p as any).name || "Untitled");
             const thumb =
-              p?.thumbnail ?? p?.Thumbnail ?? p?.imageurl ?? p?.ImageURL ?? p?.image ?? "";
+              (p as any).thumbnail || (p as any).imageurl || (p as any).image || "";
 
             return (
               <li
@@ -205,17 +200,14 @@ export default function ProductGallery({ client, range }: Props) {
                 <div className="flex-1 min-w-0">
                   <div className="font-medium truncate">{title}</div>
                   <div className="text-xs text-slate-500 space-x-2">
-                    {p?.sku && <span>SKU: {String(p.sku)}</span>}
-                    {p?.code && <span>Code: {String(p.code)}</span>}
-                    {(p?.category || p?.Category) && (
-                      <span>Category: {String(p?.category || p?.Category)}</span>
-                    )}
+                    {(p as any).sku && <span>SKU: {String((p as any).sku)}</span>}
+                    {(p as any).category && <span>Category: {String((p as any).category)}</span>}
                   </div>
-                  {p?.description && (
+                  {(p as any).description ? (
                     <p className="mt-1 text-sm text-slate-700 line-clamp-2">
-                      {String(p.description)}
+                      {String((p as any).description)}
                     </p>
-                  )}
+                  ) : null}
                 </div>
               </li>
             );
