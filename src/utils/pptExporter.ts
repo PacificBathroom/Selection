@@ -1,69 +1,73 @@
 // src/utils/pptExporter.ts
-// @ts-ignore - pptxgenjs ships no types in some builds
+// @ts-ignore
 import PptxGenJS from "pptxgenjs";
 import { renderPdfFirstPageToDataUrl } from "../utils/pdfPreview";
 import type { ClientInfo, Product } from "../types";
 
-/* ===== VISUALS ===== */
+/* =====================  STYLE  ===================== */
 const FONT = "Calibri";
 const COLOR_TEXT = "0F172A";
 const COLOR_SUB = "334155";
 const COLOR_MUTED = "64748B";
-const COLOR_FOOTER = "40E0D0"; // turquoise
+const COLOR_FOOTER = "2EC7C0"; // turquoise
 
-/* ===== SLIDE GEOMETRY (16:9 ~ 13.33 x 7.5 in) ===== */
-const SLIDE_W = 13.33;
-const SLIDE_H = 7.5;
+/* =====================  GEOMETRY (16:9)  =====================
+   16:9 slide is ~13.33 x 7.5 inches
+*/
+const SLIDE = { w: 13.33, h: 7.5 };
 
-const L = 0.6;                // standard left gutter
-const R = SLIDE_W - 0.6;      // right edge reference
-
+// product layout
 const PRODUCT = {
-  // Title at top, centered
-  title: { x: L, y: 0.35, w: SLIDE_W - L * 2, h: 0.7 },
-
-  // Two columns (image left, specs right)
-  img:   { x: L,        y: 1.15, w: 6.0, h: 3.9 },
-  specs: { x: L + 6.3,  y: 1.15, w: 6.0, h: 3.9 },
-
-  // Description under the columns
-  desc:  { x: L, y: 5.2, w: SLIDE_W - L * 2, h: 0.9 },
-
-  // Code above the footer
-  code:  { x: L, y: 6.1, w: SLIDE_W - L * 2, h: 0.5 },
-
-  // Footer
-  footerBar: { x: 0, y: 6.9, w: SLIDE_W, h: 0.35 },
-  footerTxt: { x: 1.5, y: 6.98, w: SLIDE_W - 2.0, h: 0.4 },
+  // top title
+  title: { x: 0.7, y: 0.35, w: 11.9, h: 0.6 },
+  // left image
+  img: { x: 0.7, y: 1.1, w: 6.2, h: 3.9 },
+  // right spec (pdf preview OR bullets)
+  specs: { x: 7.1, y: 1.1, w: 5.5, h: 3.9 },
+  // description just above footer
+  desc: { x: 0.7, y: 5.25, w: 11.9, h: 0.8 },
+  // code line under description
+  code: { x: 0.7, y: 6.05, w: 11.9, h: 0.5 },
+  // footer bar + text
+  footerBar: { x: 0, y: 6.8, w: 13.33, h: 0.45 },
+  footerText: { x: 1.4, y: 6.87, w: 11.5, h: 0.35 },
 };
 
-const stripDataPrefix = (s: string) => s.replace(/^data:[^;]+;base64,/, "");
+/* =====================  HELPERS  ===================== */
 
-/** Robust field getter that tolerates different header spellings/cases */
-function getField(obj: any, names: string[], fallback = ""): string {
-  for (const n of names) {
-    const v =
-      obj?.[n] ??
-      obj?.[n.toLowerCase()] ??
-      obj?.[n.replace(/\s+/g, "")] ??
-      obj?.[n.replace(/[_\s]+/g, "")];
-    if (v != null && String(v).trim() !== "") return String(v);
-  }
-  return fallback;
-}
+// addText with safe defaults (autoshrink, no trailing para space)
+const addText = (s: any, text: string | undefined, opts: any) => {
+  const t = (text ?? "").toString().trim();
+  if (!t) return;
+  s.addText(t, {
+    fontFace: FONT,
+    autoFit: true,
+    paraSpaceAfter: 0,
+    ...opts,
+  });
+};
 
-/** Proxy any external URL via our Netlify function (avoids CORS headaches) */
-function viaProxy(u?: string | null) {
+// remove data: prefix
+const stripDataPrefix = (d: string) => d.replace(/^data:[^;]+;base64,/, "");
+
+/**
+ * Prefer local assets (served by Netlify from /public) and only proxy real external URLs.
+ * - Local examples: /assets/products/foo.jpg  |  /assets/products/foo.pdf
+ * - External gets proxied: https://site.com/file.pdf  ->  /api/pdf-proxy?url=…
+ */
+const viaProxy = (u?: string | null): string | undefined => {
   const s = (u ?? "").toString().trim();
-  if (!s || !/^https?:\/\//i.test(s)) return undefined;
-  return `/api/pdf-proxy?url=${encodeURIComponent(s)}`;
-}
+  if (!s) return undefined;
+  if (s.startsWith("/")) return s; // local asset – serve directly
+  if (/^https?:\/\//i.test(s)) return `/api/pdf-proxy?url=${encodeURIComponent(s)}`;
+  return undefined;
+};
 
-/** Fetch any image/PDF URL and return a data: URL string */
-async function fetchAsDataUrl(rawUrl: string): Promise<string> {
-  const url = viaProxy(rawUrl);
-  if (!url) throw new Error("Bad URL");
-  const res = await fetch(url, { credentials: "omit" });
+// fetch any URL (local path or proxied external) as data URL
+async function fetchAsDataUrl(u: string): Promise<string> {
+  const resolved = viaProxy(u);
+  if (!resolved) throw new Error(`Bad URL: ${u}`);
+  const res = await fetch(resolved, { credentials: "omit" });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const blob = await res.blob();
   return await new Promise<string>((resolve, reject) => {
@@ -74,32 +78,30 @@ async function fetchAsDataUrl(rawUrl: string): Promise<string> {
   });
 }
 
-/** Auto-size title a bit for long names */
-function titleSize(name: string) {
+// try a series of field names against a product row
+const pick = (row: any, keys: string[], fallback = ""): string => {
+  for (const k of keys) {
+    const v =
+      row?.[k] ??
+      row?.[k.toLowerCase?.()] ??
+      row?.[k.replace(/\s+/g, "")] ??
+      row?.[k.replace(/[_-]+/g, "")];
+    if (v != null && String(v).trim() !== "") return String(v).trim();
+  }
+  return fallback;
+};
+
+// dynamic title size to help prevent overflow
+const titleSize = (name: string) => {
   const n = (name || "").length;
   if (n <= 28) return 28;
-  if (n <= 36) return 26;
-  if (n <= 48) return 24;
-  if (n <= 60) return 22;
-  return 20;
-}
+  if (n <= 40) return 24;
+  if (n <= 56) return 22;
+  if (n <= 72) return 20;
+  return 18;
+};
 
-/** Add text with consistent defaults and autoshrink */
-function addText(s: any, text: string, box: any, opts: any = {}) {
-  if (!text) return;
-  s.addText(text, {
-    fontFace: FONT,
-    color: COLOR_TEXT,
-    autoFit: true,         // shrink to fit box
-    valign: "top",
-    margin: 4,
-    paraSpaceAfter: 0,
-    ...box,
-    ...opts,
-  });
-}
-
-/* ===== MAIN EXPORT ===== */
+/* =====================  MAIN EXPORTER  ===================== */
 export async function exportDeckFromProducts({
   client,
   products,
@@ -108,169 +110,221 @@ export async function exportDeckFromProducts({
   products: Product[];
 }) {
   const pptx = new PptxGenJS();
-  // Force 16:9 layout
   (pptx as any).layout = "LAYOUT_16x9";
 
-  // Master slides with numeric w/h (avoids TS type errors)
+  // ====== Masters (backgrounds locked) ======
   pptx.defineSlideMaster({
     title: "COVER1",
-    objects: [{ image: { path: "/cover-bg-1.png", x: 0, y: 0, w: SLIDE_W, h: SLIDE_H } }],
+    objects: [{ image: { path: "/cover-bg-1.png", x: 0, y: 0, w: SLIDE.w, h: SLIDE.h } }],
   });
   pptx.defineSlideMaster({
     title: "COVER2",
-    objects: [{ image: { path: "/cover-bg-2.png", x: 0, y: 0, w: SLIDE_W, h: SLIDE_H } }],
+    objects: [{ image: { path: "/cover-bg-2.png", x: 0, y: 0, w: SLIDE.w, h: SLIDE.h } }],
   });
   pptx.defineSlideMaster({
     title: "END1",
-    objects: [{ image: { path: "/end-bg-1.png", x: 0, y: 0, w: SLIDE_W, h: SLIDE_H } }],
+    objects: [{ image: { path: "/end-bg-1.png", x: 0, y: 0, w: SLIDE.w, h: SLIDE.h } }],
   });
   pptx.defineSlideMaster({
     title: "END2",
-    objects: [{ image: { path: "/end-bg-2.png", x: 0, y: 0, w: SLIDE_W, h: SLIDE_H } }],
+    objects: [{ image: { path: "/end-bg-2.png", x: 0, y: 0, w: SLIDE.w, h: SLIDE.h } }],
   });
   pptx.defineSlideMaster({
-    title: "PRODUCT",
+    title: "PLAIN",
     background: { color: "FFFFFF" },
-    objects: [],
   });
 
-  /* ---- COVER 1 ---- */
+  // ====== Cover 1 ======
   {
     const s = pptx.addSlide({ masterName: "COVER1" });
-    addText(s, client.projectName || "Project Selection", PRODUCT.title, {
+    addText(s, client.projectName || "Project Selection", {
+      x: 0.8,
       y: 1.0,
-      fontSize: 34,
+      w: SLIDE.w - 1.6,
+      h: 0.8,
+      fontSize: 36,
       bold: true,
-      align: "left",
+      color: COLOR_TEXT,
     });
-    addText(s, `Prepared for ${client.clientName || "Client"}`, { x: L, y: 1.75, w: SLIDE_W - L * 2, h: 0.5 }, {
+    addText(s, `Prepared for ${client.clientName || "Client"}`, {
+      x: 0.8,
+      y: 1.8,
+      w: SLIDE.w - 1.6,
+      h: 0.6,
       fontSize: 16,
       color: COLOR_SUB,
     });
     addText(
       s,
-      client.dateISO ? new Date(client.dateISO).toLocaleDateString() : new Date().toLocaleDateString(),
-      { x: L, y: 2.15, w: SLIDE_W - L * 2, h: 0.4 },
-      { fontSize: 12, color: COLOR_MUTED }
+      client.dateISO
+        ? new Date(client.dateISO).toLocaleDateString()
+        : new Date().toLocaleDateString(),
+      { x: 0.8, y: 2.25, w: SLIDE.w - 1.6, h: 0.5, fontSize: 12, color: COLOR_MUTED }
     );
-    // Optional contact
-    if (client.contactName) addText(s, client.contactName, { x: L, y: 2.6, w: SLIDE_W - L * 2, h: 0.4 }, { fontSize: 14 });
-    const details = [client.contactEmail, client.contactPhone].filter(Boolean).join(" · ");
-    if (details)
-      addText(s, details, { x: L, y: 3.0, w: SLIDE_W - L * 2, h: 0.4 }, { fontSize: 12, color: COLOR_SUB });
+    // contact on cover too (optional)
+    if (client.contactName) {
+      addText(s, client.contactName, {
+        x: 0.8,
+        y: 2.75,
+        w: SLIDE.w - 1.6,
+        h: 0.5,
+        fontSize: 14,
+        color: COLOR_TEXT,
+      });
+      const details = [client.contactEmail, client.contactPhone]
+        .filter(Boolean)
+        .join(" · ");
+      addText(s, details, {
+        x: 0.8,
+        y: 3.15,
+        w: SLIDE.w - 1.6,
+        h: 0.4,
+        fontSize: 12,
+        color: COLOR_SUB,
+      });
+    }
   }
 
-  /* ---- COVER 2 (contact emphasis) ---- */
+  // ====== Cover 2 (contact emphasis) ======
   {
     const s = pptx.addSlide({ masterName: "COVER2" });
-    addText(s, client.projectName || "Project Selection", { x: L, y: 1.0, w: SLIDE_W - L * 2, h: 0.7 }, {
-      fontSize: 28,
+    addText(s, client.projectName || "Project Selection", {
+      x: 0.8,
+      y: 1.0,
+      w: SLIDE.w - 1.6,
+      h: 0.7,
+      fontSize: 30,
       bold: true,
-      align: "left",
+      color: COLOR_TEXT,
     });
-    if (client.contactName)
-      addText(s, client.contactName, { x: L, y: 1.7, w: SLIDE_W - L * 2, h: 0.5 }, { fontSize: 16, color: COLOR_SUB });
-    const details2 = [client.contactEmail, client.contactPhone].filter(Boolean).join(" · ");
+    addText(s, client.contactName || "", {
+      x: 0.8,
+      y: 1.8,
+      w: SLIDE.w - 1.6,
+      h: 0.5,
+      fontSize: 16,
+      color: COLOR_SUB,
+    });
+    const details2 = [client.contactEmail, client.contactPhone]
+      .filter(Boolean)
+      .join(" · ");
     if (details2)
-      addText(s, details2, { x: L, y: 2.1, w: SLIDE_W - L * 2, h: 0.4 }, { fontSize: 12, color: COLOR_MUTED });
+      addText(s, details2, {
+        x: 0.8,
+        y: 2.25,
+        w: SLIDE.w - 1.6,
+        h: 0.5,
+        fontSize: 12,
+        color: COLOR_MUTED,
+      });
   }
 
-  /* ---- PRODUCT SLIDES ---- */
+  // ====== Product slides ======
   for (const row of products as any[]) {
-    const name  = getField(row, ["Name", "Product"]);
-    const code  = getField(row, ["Code", "SKU", "Product Code"]);
-    const img   = getField(row, ["ImageURL", "Image Url", "Image", "imagebox", "image_box", "Thumbnail"]);
-    const pdf   = getField(row, ["PdfURL", "PDF URL", "Specs PDF", "Spec", "SpecsUrl"]);
-    const desc  = getField(row, ["Description", "Product Description"]);
-    const specsStr = getField(row, ["SpecsBullets", "Specs", "Specifications"], "");
-    const specsBullets =
-      specsStr ? specsStr.split(/\r?\n|,|•/).map((s) => s.trim()).filter(Boolean) : undefined;
+    const name = pick(row, ["Name", "Product", "product"]);
+    const code = pick(row, ["Code", "SKU", "Product Code", "sku"]);
+    const imgUrl = pick(row, ["ImageURL", "Image Url", "Image", "imageurl", "image"]);
+    const pdfUrl = pick(row, ["PdfURL", "PDF URL", "Specs PDF", "Spec", "SpecsUrl"]);
+    const desc = pick(row, ["Description", "Product Description", "description"]);
+    const specsText = pick(row, ["Specs", "Specifications"]);
 
-    const s = pptx.addSlide({ masterName: "PRODUCT" });
+    const slide = pptx.addSlide({ masterName: "PLAIN" });
 
-    // Title at top
-    addText(s, name || "Product", PRODUCT.title, {
+    // Title at top (autoshrink)
+    addText(slide, name || "Product", {
+      ...PRODUCT.title,
       fontSize: titleSize(name || "Product"),
+      color: COLOR_TEXT,
       bold: true,
       align: "center",
     });
 
-    // Left image (through proxy)
-    if (img) {
+    // Left image
+    if (imgUrl) {
       try {
-        const dataUrl = await fetchAsDataUrl(img);
-        s.addImage({
+        const dataUrl = await fetchAsDataUrl(imgUrl);
+        slide.addImage({
           data: stripDataPrefix(dataUrl),
-          x: PRODUCT.img.x,
-          y: PRODUCT.img.y,
-          w: PRODUCT.img.w,
-          h: PRODUCT.img.h,
+          ...PRODUCT.img,
           sizing: { type: "contain", w: PRODUCT.img.w, h: PRODUCT.img.h },
         });
       } catch {
-        // ignore; keep blank tile
+        // ignore
       }
     }
 
-    // Right specs: PDF first page → bullets
+    // Right specs: PDF first page preferred, else bullet text
     let drewSpecs = false;
-    if (pdf) {
+    if (pdfUrl) {
       try {
-        const png = await renderPdfFirstPageToDataUrl(viaProxy(pdf)!, 1200);
-        s.addImage({
+        const png = await renderPdfFirstPageToDataUrl(viaProxy(pdfUrl)!, 1200);
+        slide.addImage({
           data: stripDataPrefix(png),
-          x: PRODUCT.specs.x,
-          y: PRODUCT.specs.y,
-          w: PRODUCT.specs.w,
-          h: PRODUCT.specs.h,
+          ...PRODUCT.specs,
           sizing: { type: "contain", w: PRODUCT.specs.w, h: PRODUCT.specs.h },
         });
         drewSpecs = true;
       } catch {
-        // fall back to bullets below
+        // fall through to text bullets
       }
     }
-    if (!drewSpecs && specsBullets?.length) {
-      addText(
-        s,
-        specsBullets.map((b) => `• ${b}`).join("\n"),
-        PRODUCT.specs,
-        { fontSize: 12, color: COLOR_SUB }
-      );
+    if (!drewSpecs && specsText) {
+      const bullets = specsText
+        .split(/\r?\n|,|•/g)
+        .map((b) => b.trim())
+        .filter(Boolean)
+        .slice(0, 18); // cap to avoid overflow
+      if (bullets.length) {
+        addText(slide, bullets.map((b) => `• ${b}`).join("\n"), {
+          x: PRODUCT.specs.x,
+          y: PRODUCT.specs.y,
+          w: PRODUCT.specs.w,
+          h: PRODUCT.specs.h,
+          fontSize: 12,
+          color: COLOR_SUB,
+          align: "left",
+        });
+      }
     }
 
-    // Description (auto-fit)
+    // Description (shrink to fit)
     if (desc) {
-      addText(s, desc, PRODUCT.desc, { fontSize: 12, color: COLOR_SUB, align: "center" });
+      addText(slide, desc, {
+        ...PRODUCT.desc,
+        fontSize: 12,
+        color: COLOR_SUB,
+        align: "center",
+      });
     }
 
-    // Code
+    // Code line
     if (code) {
-      addText(s, code, PRODUCT.code, { fontSize: 11, align: "center" });
+      addText(slide, code, {
+        ...PRODUCT.code,
+        fontSize: 11,
+        color: COLOR_TEXT,
+        align: "center",
+      });
     }
 
-    // Footer bar + text (some pptxgenjs builds need string shape type)
-    s.addShape("rect", {
+    // Footer bar + logo + text (numeric width to satisfy TS)
+    slide.addShape(pptx.ShapeType.rect, {
       x: PRODUCT.footerBar.x,
       y: PRODUCT.footerBar.y,
       w: PRODUCT.footerBar.w,
       h: PRODUCT.footerBar.h,
       fill: { color: COLOR_FOOTER },
-      line: { color: COLOR_FOOTER },
     });
-    // Optional logo in footer
-    try {
-      s.addImage({ path: "/logo.png", x: 0.3, y: 6.98, w: 1.0, h: 0.3 });
-    } catch {}
-    addText(
-      s,
-      "Pacific Bathroom · Project Selections",
-      PRODUCT.footerTxt,
-      { fontSize: 10, color: "FFFFFF", align: "left" }
-    );
+    slide.addImage({ path: "/logo.png", x: 0.35, y: PRODUCT.footerBar.y + 0.05, w: 1.1, h: 0.35 });
+    addText(slide, "Pacific Bathroom · Project Selections", {
+      ...PRODUCT.footerText,
+      fontSize: 10,
+      color: "FFFFFF",
+      align: "left",
+    });
   }
 
-  // Two blank end slides (branding pages)
+  // blank end slides
   pptx.addSlide({ masterName: "END1" });
   pptx.addSlide({ masterName: "END2" });
 
