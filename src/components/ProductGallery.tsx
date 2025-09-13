@@ -9,16 +9,25 @@ type Props = {
   range?: string; // e.g. "Products!A1:ZZ"
 };
 
-function productKey(p: any, i: number): string {
+// Build a stable key that won’t change when the list is re-sorted or filtered.
+function productKey(p: any): string {
   const cands = [
-    p.id, p._id, p._row, p.row, p.Row,
-    p.sku, p.SKU, p.code, p.Code,
+    p.id, p._id, p._row, p.row, p.Row, p.__row,
+    p.sku, p.SKU,
+    p.code, p.Code,
     p.url, p.Url, p.source_url, p.SourceURL,
-    p.imageurl, p.ImageURL, p.image,
-    p.name, p.Name, p.product, p.Product,
-  ];
-  const first = cands.find((v) => typeof v === "string" && v.trim() !== "");
-  return String(first ?? `idx#${i}`);
+  ].filter((v) => typeof v === "string" && v.trim() !== "");
+  if (cands.length) return String(cands[0]);
+
+  // Fallback: compose from relatively stable fields
+  const name = String(p.product ?? p.Product ?? p.name ?? p.Name ?? "").trim();
+  const code = String(p.sku ?? p.SKU ?? p.code ?? p.Code ?? "").trim();
+  if (name || code) return `${name}#${code}`.toLowerCase();
+
+  // Final fallback (rare): hash a few columns so it’s still stable per row content
+  const img = String(p.ImageURL ?? p.imageurl ?? p.image ?? "").trim();
+  const pdf = String(p.PdfURL ?? p["PDF URL"] ?? p.SpecUrl ?? p.SpecsUrl ?? "").trim();
+  return `row#${[name, code, img, pdf].join("|").toLowerCase()}`;
 }
 
 export default function ProductGallery({ client, range }: Props) {
@@ -41,7 +50,7 @@ export default function ProductGallery({ client, range }: Props) {
       setLoading(true);
       setErrorMsg(null);
       const res = await fetchProducts({ q: search, category, range });
-      setItems(res);
+      setItems(res || []);
     } catch (e: any) {
       console.error(e);
       setItems([]);
@@ -72,8 +81,8 @@ export default function ProductGallery({ client, range }: Props) {
     return arr;
   }, [items, sortBy]);
 
-  const toggle = (p: Product, index: number) => {
-    const key = productKey(p as any, index);
+  const toggle = (p: Product) => {
+    const key = productKey(p as any);
     setSelected((prev) => {
       const next = { ...prev };
       if (next[key]) delete next[key];
@@ -91,6 +100,7 @@ export default function ProductGallery({ client, range }: Props) {
     }
     try {
       setExporting(true);
+      // Pass the RAW rows straight through to the exporter
       await exportDeckFromProducts({ client, products: selectedList });
     } catch (e: any) {
       console.error(e);
@@ -165,12 +175,18 @@ export default function ProductGallery({ client, range }: Props) {
         <p className="text-sm text-slate-500">No products found.</p>
       ) : (
         <ul className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-          {visibleItems.map((p, i) => {
-            const key = productKey(p as any, i);
+          {visibleItems.map((p) => {
+            const key = productKey(p as any);
             const checked = Boolean(selected[key]);
             const title = String((p as any).product || (p as any).name || "Untitled");
+
+            // Thumbnail aliases: now includes ImageURL (matches exporter)
             const thumb =
-              (p as any).thumbnail || (p as any).imageurl || (p as any).image || "";
+              (p as any).thumbnail ??
+              (p as any).imageurl ??
+              (p as any).ImageURL ??
+              (p as any).image ??
+              "";
 
             return (
               <li
@@ -181,7 +197,7 @@ export default function ProductGallery({ client, range }: Props) {
                   <input
                     type="checkbox"
                     checked={checked}
-                    onChange={() => toggle(p, i)}
+                    onChange={() => toggle(p)}
                     aria-label={`Select ${title}`}
                   />
                 </div>
