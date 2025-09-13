@@ -1,23 +1,25 @@
-// src/components/ProductGallery.tsx (excerpt)
+// src/components/ProductGallery.tsx
+import React, { useEffect, useMemo, useState } from "react";
+import type { ClientInfo } from "../types";
+import { fetchProducts } from "../api/sheets";
 import { exportDeckFromProducts } from "../utils/pptExporter";
-// … your other imports
 
-// selectedRows must be the RAW sheet rows (including ImageURL, PdfURL, etc.)
-async function handleExport(client: ClientInfo, selectedRows: any[]) {
-  // ❗ Do NOT remap/destroy fields; pass directly:
-  await exportDeckFromProducts({ client, products: selectedRows });
-}
+type Props = {
+  client: ClientInfo;      // pass from App/Header state
+  range?: string;          // optional: e.g. "Products!A1:Z"
+};
+
 export default function ProductGallery({ client, range }: Props) {
-  const [items, setItems] = useState<Product[]>([]);
+  // Use 'any' to preserve ALL original sheet columns (ImageURL, PdfURL, etc.)
+  const [items, setItems] = useState<any[]>([]);
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("");
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
-  const [selected, setSelected] = useState<Record<string, Product>>({});
+  const [selected, setSelected] = useState<Record<string, any>>({});
   const [sortBy, setSortBy] = useState<"sheet" | "name" | "category">("sheet");
 
-  // initial load
   useEffect(() => {
     runSearch();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -27,8 +29,9 @@ export default function ProductGallery({ client, range }: Props) {
     try {
       setLoading(true);
       setErrorMsg(null);
+      // IMPORTANT: fetchProducts should return raw rows (original headers)
       const res = await fetchProducts({ q: search, category, range });
-      setItems(res);
+      setItems(res || []);
     } catch (e: any) {
       console.error(e);
       setItems([]);
@@ -40,7 +43,7 @@ export default function ProductGallery({ client, range }: Props) {
 
   const categories = useMemo(() => {
     const s = new Set(
-      items.map((i) => String(i.category || "").trim()).filter(Boolean)
+      items.map((i) => String(i?.category || i?.Category || "").trim()).filter(Boolean)
     );
     return Array.from(s).sort((a, b) => a.localeCompare(b));
   }, [items]);
@@ -49,26 +52,27 @@ export default function ProductGallery({ client, range }: Props) {
     const arr = [...items];
     if (sortBy === "name") {
       arr.sort((a, b) =>
-        String((a as any).product || (a as any).name || "").localeCompare(
-          String((b as any).product || (b as any).name || "")
+        String(a?.product || a?.Product || a?.name || "").localeCompare(
+          String(b?.product || b?.Product || b?.name || "")
         )
       );
     } else if (sortBy === "category") {
       arr.sort((a, b) =>
-        String(a.category || "").localeCompare(String(b.category || ""))
+        String(a?.category || a?.Category || "").localeCompare(
+          String(b?.category || b?.Category || "")
+        )
       );
     }
     return arr;
   }, [items, sortBy]);
 
-  const toggle = (p: Product, index: number) => {
-    const key = String(
-      (p as any).sku ||
-        (p as any).code ||
-        (p as any).Code ||
-        (p as any).product ||
-        index
+  const keyFor = (p: any, index: number) =>
+    String(
+      p?.sku ?? p?.SKU ?? p?.code ?? p?.Code ?? p?.product ?? p?.Product ?? index
     );
+
+  const toggle = (p: any, index: number) => {
+    const key = keyFor(p, index);
     setSelected((prev) => {
       const next = { ...prev };
       if (next[key]) delete next[key];
@@ -86,6 +90,7 @@ export default function ProductGallery({ client, range }: Props) {
     }
     try {
       setExporting(true);
+      // CRITICAL: pass RAW rows directly; do not remap/destroy fields
       await exportDeckFromProducts({ client, products: selectedList });
     } catch (e: any) {
       console.error(e);
@@ -102,7 +107,7 @@ export default function ProductGallery({ client, range }: Props) {
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search products, SKU, description, client…"
+          placeholder="Search products, SKU, description…"
           className="border rounded-xl px-3 py-2 text-sm w-full sm:w-80"
         />
 
@@ -121,7 +126,9 @@ export default function ProductGallery({ client, range }: Props) {
 
         <select
           value={sortBy}
-          onChange={(e) => setSortBy(e.target.value as "sheet" | "name" | "category")}
+          onChange={(e) =>
+            setSortBy(e.target.value as "sheet" | "name" | "category")
+          }
           className="border rounded-xl px-3 py-2 text-sm"
         >
           <option value="sheet">Sheet order</option>
@@ -163,32 +170,18 @@ export default function ProductGallery({ client, range }: Props) {
       ) : (
         <ul className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
           {visibleItems.map((p, i) => {
-            const key = String(
-              (p as any).sku ||
-                (p as any).code ||
-                (p as any).Code ||
-                (p as any).product ||
-                i
-            );
+            const key = keyFor(p, i);
             const checked = Boolean(selected[key]);
-            const title = String((p as any).product || (p as any).name || "Untitled");
+            const title = String(p?.product || p?.Product || p?.name || "Untitled");
 
             const thumb =
-              (p as any).thumbnail ||
-              (p as any).imageurl ||
-              (p as any).image ||
-              "";
-
-            const price =
-              (p as any).price != null &&
-              String((p as any).price).trim() !== ""
-                ? typeof (p as any).price === "number"
-                  ? `$${(p as any).price.toFixed(2)}`
-                  : String((p as any).price)
-                : "";
+              p?.thumbnail ?? p?.Thumbnail ?? p?.imageurl ?? p?.ImageURL ?? p?.image ?? "";
 
             return (
-              <li key={key} className={`border rounded-2xl p-3 flex gap-3 ${checked ? "ring-2 ring-blue-500" : ""}`}>
+              <li
+                key={key}
+                className={`border rounded-2xl p-3 flex gap-3 ${checked ? "ring-2 ring-blue-500" : ""}`}
+              >
                 <div className="pt-1">
                   <input
                     type="checkbox"
@@ -212,15 +205,17 @@ export default function ProductGallery({ client, range }: Props) {
                 <div className="flex-1 min-w-0">
                   <div className="font-medium truncate">{title}</div>
                   <div className="text-xs text-slate-500 space-x-2">
-                    {(p as any).sku && <span>SKU: {String((p as any).sku)}</span>}
-                    {(p as any).category && <span>Category: {String((p as any).category)}</span>}
+                    {p?.sku && <span>SKU: {String(p.sku)}</span>}
+                    {p?.code && <span>Code: {String(p.code)}</span>}
+                    {(p?.category || p?.Category) && (
+                      <span>Category: {String(p?.category || p?.Category)}</span>
+                    )}
                   </div>
-                  {price && <div className="mt-1 font-semibold">{price}</div>}
-                  {(p as any).description ? (
+                  {p?.description && (
                     <p className="mt-1 text-sm text-slate-700 line-clamp-2">
-                      {String((p as any).description)}
+                      {String(p.description)}
                     </p>
-                  ) : null}
+                  )}
                 </div>
               </li>
             );
