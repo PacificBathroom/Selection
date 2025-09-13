@@ -1,15 +1,12 @@
-// src/components/ProductGallery.tsx
-import React, { useEffect, useMemo, useState } from "react";
-import type { ClientInfo, Product } from "../types";
+// src/components/ProductGallery.tsx (excerpt)
 import { exportDeckFromProducts } from "../utils/pptExporter";
-import { fetchProducts } from "../api/sheets";
+// … your other imports
 
-type Props = {
-  client: ClientInfo;
-  /** If your sheet tab isn’t “Products”, pass e.g. "Sheet1!A1:ZZ" */
-  range?: string;
-};
-
+// selectedRows must be the RAW sheet rows (including ImageURL, PdfURL, etc.)
+async function handleExport(client: ClientInfo, selectedRows: any[]) {
+  // ❗ Do NOT remap/destroy fields; pass directly:
+  await exportDeckFromProducts({ client, products: selectedRows });
+}
 export default function ProductGallery({ client, range }: Props) {
   const [items, setItems] = useState<Product[]>([]);
   const [search, setSearch] = useState("");
