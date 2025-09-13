@@ -1,57 +1,61 @@
 // src/types.ts
 
-/** Client/project details live in the app UI (not in Google Sheets). */
-export type ClientInfo = {
+/** Information entered in the app (not in Google Sheets) */
+export interface ClientInfo {
   projectName?: string;
   clientName?: string;
-  dateISO?: string;       // yyyy-mm-dd
+  dateISO?: string;
+
   contactName?: string;
   contactEmail?: string;
   contactPhone?: string;
-};
+}
+
+/** A single product row from Google Sheets */
+export interface Product {
+  // Basic identifiers
+  id?: string;
+  name?: string;
+  code?: string;
+  sku?: string;
+  category?: string;
+
+  // Display / marketing
+  description?: string;
+  features?: string[];
+
+  // Media
+  image?: string;       // direct URL to product image
+  imageUrl?: string;    // alias
+  thumbnail?: string;   // alias
+  specPdfUrl?: string;  // direct PDF link
+  pdfUrl?: string;      // alias
+
+  // Specs (structured or raw text)
+  specs?: Array<{ label?: string; value?: string }> | string;
+  specifications?: string;
+  price?: string | number;
+
+  // Any extra dynamic keys from the sheet
+  [key: string]: any;
+}
 
 /**
- * A row from Google Sheets. Keep flexible so ALL columns pass through untouched.
- * pptExporter / ProductGallery read fields like ImageURL, PdfURL, Specs, etc.
+ * Logical grouping of products.
+ * Older code sometimes referred to a single `product` instead of an array.
  */
-export type Product = {
-  [key: string]: any;
+export interface Section {
+  title?: string;
+  products?: Product[];
 
-  // common, optional fields:
-  Name?: string;
-  Product?: string;
-  Code?: string;
-  SKU?: string | number;
-  Category?: string;
-  category?: string;
-  Description?: string;
+  /** legacy alias — some code may still expect this */
+  product?: Product;
+}
 
-  // image fields
-  ImageURL?: string;
-  Image?: string;
-  Thumbnail?: string;
-  imageurl?: string;
-
-  // specs/pdf
-  PdfURL?: string;
-  "PDF URL"?: string;
-  Specs?: string;
-  Specifications?: string;
-};
-
-/** Back-compat alias that some files may import. */
-export type ProductRow = Product;
-
-/** SHIMS for legacy components still importing these: */
-export type Asset = {
-  id: string;
+/** Asset placeholder (kept for compatibility, can extend if needed) */
+export interface Asset {
   url: string;
-  kind?: "image" | "pdf" | "link";
-  title?: string;
-};
+  type?: string;
+}
 
-export type Section = {
-  id: string;
-  title?: string;
-  products?: any[]; // keep loose to avoid cascading refactors
-};
+export type { ClientInfo as default };
