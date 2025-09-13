@@ -15,22 +15,12 @@ exports.handler = async (event) => {
 
     const r = await fetch(url, {
       redirect: "follow",
-      headers: {
-        // Some hosts (incl. Drive/CDNs) behave better with these:
-        "User-Agent": "Mozilla/5.0 (compatible; NetlifyPDFProxy/1.0)",
-        "Accept": "*/*",
-      },
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; PacificBathroomBot/1.0)" }
     });
-
     const ct = r.headers.get("content-type") || "application/octet-stream";
+
     if (debug) {
-      return json(200, {
-        requestedUrl: url,
-        finalUrl: r.url,
-        status: r.status,
-        ok: r.ok,
-        contentType: ct,
-      });
+      return json(200, { requestedUrl: url, finalUrl: r.url, status: r.status, ok: r.ok, contentType: ct });
     }
     if (!r.ok) return text(r.status, `Upstream error ${r.status} for ${r.url}`);
 
