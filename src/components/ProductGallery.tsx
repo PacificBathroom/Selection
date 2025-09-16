@@ -1,40 +1,40 @@
 // src/components/ProductGallery.tsx
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import type { ClientInfo, Product } from "../types";
 import { fetchProducts } from "../api/sheets";
 import { exportDeckFromProducts } from "../utils/pptExporter";
+
+// --- small helper: quick hash so we never collide ---
+function hash(str: string) {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(36);
+}
+
+// A stable unique key for each product row.
+// Order of preference: id/_id/_row/code/SKU/url → name+index → hashed fallback
+function productKeyOf(p: any, i: number): string {
+  const candidates = [
+    p.id, p._id, p._row, p.row,
+    p.sku, p.SKU, p.code, p.Code,
+    p.url, p.Url, p.source_url, p.SourceURL,
+  ].filter((v) => typeof v === "string" && v.trim() !== "");
+  if (candidates.length) return candidates[0].trim();
+
+  const name = String(p.product ?? p.name ?? "").trim();
+  if (name) return `${name}#${i}`;
+
+  // final fallback: stable-ish hash of serialized row + index
+  return `row#${hash(JSON.stringify(p))}#${i}`;
+}
 
 type Props = {
   client: ClientInfo;
   range?: string; // e.g. "Products!A1:ZZ"
 };
-
-/** Stable key builder – tries several columns before falling back to index */
-function productKey(p: any, index: number): string {
-  const cand =
-    p?.id ??
-    p?._id ??
-    p?._row ??
-    p?.row ??
-    p?.Row ??
-    p?.sku ??
-    p?.SKU ??
-    p?.code ??
-    p?.Code ??
-    p?.url ??
-    p?.Url ??
-    p?.source_url ??
-    p?.SourceURL ??
-    p?.imageurl ??
-    p?.ImageURL ??
-    p?.image ??
-    p?.name ??
-    p?.Name ??
-    p?.product ??
-    p?.Product ??
-    null;
-  return String(cand ?? `idx#${index}`);
-}
 
 export default function ProductGallery({ client, range }: Props) {
   const [items, setItems] = useState<Product[]>([]);
@@ -43,16 +43,17 @@ export default function ProductGallery({ client, range }: Props) {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
-  const [selected, setSelected] = useState<Record<string, Product>>({});
-  const [sortBy, setSortBy] = useState<"sheet" | "name" | "category">("sheet");
 
-  // initial load
+  // Use a map of key -> product for multi-select
+  const [selected, setSelected] = useState<Record<string, Product>>({});
+  const selectedList = useMemo(() => Object.values(selected), [selected]);
+
   useEffect(() => {
     runSearch();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const runSearch = useCallback(async () => {
+  async function runSearch() {
     try {
       setLoading(true);
       setErrorMsg(null);
@@ -65,57 +66,66 @@ export default function ProductGallery({ client, range }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [search, category, range]);
+  }
 
   const categories = useMemo(() => {
     const s = new Set(
-      (items as any[]).map((i) => String(i.category ?? i.Category ?? "").trim()).filter(Boolean)
+      items
+        .map((i: any) => String(i.category || i.Category || "").trim())
+        .filter(Boolean)
     );
     return Array.from(s).sort((a, b) => a.localeCompare(b));
   }, [items]);
 
+  const [sortBy, setSortBy] = useState<"sheet" | "name" | "category">("sheet");
   const visibleItems = useMemo(() => {
-    const arr = [...items] as any[];
+    const arr = [...items];
     if (sortBy === "name") {
-      arr.sort((a, b) =>
-        String(a.product ?? a.name ?? "").localeCompare(String(b.product ?? b.name ?? ""))
+      arr.sort((a: any, b: any) =>
+        String(a.product || a.name || "").localeCompare(
+          String(b.product || b.name || "")
+        )
       );
     } else if (sortBy === "category") {
-      arr.sort((a, b) => String(a.category ?? "").localeCompare(String(b.category ?? "")));
+      arr.sort((a: any, b: any) =>
+        String(a.category || "").localeCompare(String(b.category || ""))
+      );
     }
     return arr;
   }, [items, sortBy]);
 
-  const toggle = useCallback((p: Product, index: number) => {
-    const key = productKey(p as any, index);
+  function toggle(p: Product, index: number, e?: React.ChangeEvent<HTMLInputElement>) {
+    // Prevent any bubbling that might trigger parent handlers
+    if (e) e.stopPropagation();
+    const key = productKeyOf(p as any, index);
     setSelected((prev) => {
       const next = { ...prev };
       if (next[key]) delete next[key];
       else next[key] = p;
       return next;
     });
-  }, []);
+  }
 
-  const isSelected = useCallback(
-    (p: Product, index: number) => Boolean(selected[productKey(p as any, index)]),
-    [selected]
-  );
+  function onCardClick(p: Product, index: number) {
+    // Only toggle when clicking the card background, not links/controls
+    toggle(p, index);
+  }
 
-  const selectedList = useMemo(() => Object.values(selected), [selected]);
-
-  const onExport = useCallback(async () => {
-    if (selectedList.length === 0) return;
+  async function onExport() {
+    if (selectedList.length === 0) {
+      alert("Select at least one product.");
+      return;
+    }
     try {
       setExporting(true);
-      // pass the RAW rows so pptExporter can read ImageURL, PdfURL, etc.
-      await exportDeckFromProducts({ client, products: selectedList as any });
+      await exportDeckFromProducts({ client, products: selectedList });
     } catch (e: any) {
       console.error(e);
       alert(`Export failed: ${e?.message || e}`);
     } finally {
       setExporting(false);
     }
-  }, [client, selectedList]);
+  }
 
   return (
     <section className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
@@ -135,15 +145,15 @@ export default function ProductGallery({ client, range }: Props) {
         >
           <option value="">All categories</option>
           {categories.map((c) => (
-            <option key={c} value={c}>
-              {c}
-            </option>
+            <option key={c} value={c}>{c}</option>
           ))}
         </select>
 
         <select
           value={sortBy}
-          onChange={(e) => setSortBy(e.target.value as any)}
+          onChange={(e) =>
+            setSortBy(e.target.value as "sheet" | "name" | "category")
+          }
           className="border rounded-xl px-3 py-2 text-sm"
         >
           <option value="sheet">Sheet order</option>
@@ -167,7 +177,7 @@ export default function ProductGallery({ client, range }: Props) {
           <button
             type="button"
             onClick={onExport}
-            disabled={exporting || selectedList.length === 0}
+            disabled={exporting}
             className="px-3 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
           >
             {exporting ? "Exporting…" : "Export PPTX"}
@@ -184,60 +194,63 @@ export default function ProductGallery({ client, range }: Props) {
         <p className="text-sm text-slate-500">No products found.</p>
       ) : (
         <ul className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-          {visibleItems.map((p: any, i: number) => {
-            const key = productKey(p, i);
-            const checked = isSelected(p, i);
-            const title = String(p.product ?? p.name ?? "Untitled");
-            const thumb = String(p.thumbnail ?? p.imageurl ?? p.image ?? "");
+          {visibleItems.map((p, i) => {
+            const key = productKeyOf(p as any, i);
+            const checked = Boolean(selected[key]);
+            const title = String((p as any).product || (p as any).name || "Untitled");
+            const thumb =
+              (p as any).thumbnail || (p as any).imageurl || (p as any).image || "";
 
-            const onCardClick = (e: React.MouseEvent) => {
-              // ignore clicks on the checkbox itself
-              const tag = (e.target as HTMLElement).tagName.toLowerCase();
-              if (tag === "input" || tag === "button" || tag === "a") return;
-              toggle(p, i);
-            };
+            // Unique checkbox id so labels don’t cross-wire
+            const cbId = `select-${hash(key)}-${i}`;
 
             return (
               <li
                 key={key}
-                onClick={onCardClick}
-                className={`border rounded-2xl p-3 cursor-pointer transition ring-offset-2 ${
-                  checked ? "ring-2 ring-blue-500" : "hover:bg-slate-50"
+                onClick={(e) => {
+                  // only toggle when clicking card background
+                  if ((e.target as HTMLElement).closest("input,button,a,select,textarea")) return;
+                  onCardClick(p, i);
+                }}
+                className={`border rounded-2xl p-3 flex gap-3 transition ring-offset-2 ${
+                  checked ? "ring-2 ring-blue-500" : ""
                 }`}
+                data-selected={checked ? "1" : "0"}
               >
-                <div className="flex items-start gap-3">
+                <div className="pt-1">
                   <input
+                    id={cbId}
                     type="checkbox"
                     checked={checked}
-                    onChange={() => toggle(p, i)}
+                    onChange={(e) => toggle(p, i, e)}
                     aria-label={`Select ${title}`}
-                    className="mt-1"
                   />
+                </div>
 
-                  {thumb ? (
-                    <img
-                      src={thumb}
-                      alt={title}
-                      className="w-24 h-24 object-cover rounded-xl flex-none"
-                      loading="lazy"
-                    />
-                  ) : (
-                    <div className="w-24 h-24 bg-slate-100 rounded-xl flex-none" />
-                  )}
+                {thumb ? (
+                  <img
+                    src={String(thumb)}
+                    alt={title}
+                    className="w-24 h-24 object-cover rounded-xl pointer-events-none select-none"
+                    loading="lazy"
+                  />
+                ) : (
+                  <div className="w-24 h-24 bg-slate-100 rounded-xl" />
+                )}
 
-                  <div className="flex-1 min-w-0">
-                    {/* Title at top */}
-                    <div className="font-medium leading-5 truncate">{title}</div>
-                    <div className="text-xs text-slate-500 space-x-2">
-                      {p.sku && <span>SKU: {String(p.sku)}</span>}
-                      {p.category && <span>Category: {String(p.category)}</span>}
-                    </div>
-                    {p.description ? (
-                      <p className="mt-1 text-sm text-slate-700 line-clamp-2">
-                        {String(p.description)}
-                      </p>
-                    ) : null}
+                <div className="flex-1 min-w-0">
+                  <label htmlFor={cbId} className="font-medium truncate cursor-pointer">
+                    {title}
+                  </label>
+                  <div className="text-xs text-slate-500 space-x-2">
+                    {(p as any).sku && <span>SKU: {String((p as any).sku)}</span>}
+                    {(p as any).category && <span>Category: {String((p as any).category)}</span>}
                   </div>
+                  {(p as any).description ? (
+                    <p className="mt-1 text-sm text-slate-700 line-clamp-2">
+                      {String((p as any).description)}
+                    </p>
+                  ) : null}
                 </div>
               </li>
             );
