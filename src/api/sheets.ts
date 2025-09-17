@@ -23,7 +23,7 @@ const norm = (s: unknown) =>
 function pickByHeader(row: Record<string, any>, candidates: string[]): any {
   for (const key of Object.keys(row)) {
     if (candidates.includes(norm(key))) {
-      return row[key];
+      return (row as any)[key];
     }
   }
   return undefined;
@@ -36,7 +36,7 @@ const H = {
   DESC: ["description", "desc"].map(norm),
   PDF: ["pdfurl", "pdf", "specpdfurl", "specifications"].map(norm),
   CODE: ["code", "product_code", "sku"].map(norm),
-  SPECS: ["specsbullets", "specs", "features"].map(norm), // optional
+  SPECS: ["specsbullets", "specs", "features"].map(norm),
 };
 
 function toProduct(row: Record<string, any>): Product {
@@ -69,16 +69,14 @@ function toProduct(row: Record<string, any>): Product {
     features,
   };
 
-  // Keep nested "product" for legacy code that reads p.product?.foo
+  // legacy alias for code that reads p.product?.field
   product.product = product;
 
   return product;
 }
 
 /* ---------- workbook loader with header detection ---------- */
-export async function fetchProducts(
-  params: ProductFilter = {}
-): Promise<Product[]> {
+export async function fetchProducts(params: ProductFilter = {}): Promise<Product[]> {
   const { q, category, range } = params;
 
   if (!__productsCache || range) {
@@ -106,8 +104,7 @@ export async function fetchProducts(
     }
     if (!sheetName) {
       sheetName =
-        wb.SheetNames.find((n: string) => n.toLowerCase() === "products") ||
-        wb.SheetNames[0];
+        wb.SheetNames.find((n: string) => n.toLowerCase() === "products") || wb.SheetNames[0];
     }
 
     const ws = wb.Sheets[sheetName];
@@ -133,17 +130,15 @@ export async function fetchProducts(
     }
     if (headerRowIdx === -1) headerRowIdx = 0;
 
-    const rawHeaders = (matrix[headerRowIdx] || []).map((h: any) =>
-      String(h ?? "").trim()
-    );
+    const rawHeaders = (matrix[headerRowIdx] || []).map((h: any) => String(h ?? "").trim());
     const dataRows = matrix.slice(headerRowIdx + 1);
 
     // Build objects while skipping empty headers and generating safe keys
     const objects: Record<string, any>[] = dataRows.map((arr: any[]) => {
       const obj: Record<string, any> = {};
       rawHeaders.forEach((h, i) => {
-        const key = h ? h : `col_${i}`;
-        if (key) obj[key] = arr[i];
+        const key: string = h && h.length ? h : `col_${i}`;
+        (obj as any)[key] = arr[i];
       });
       return obj;
     });
@@ -153,9 +148,9 @@ export async function fetchProducts(
       .filter((p) => p.name || p.description || p.imageUrl || p.pdfUrl);
 
     if (!range) __productsCache = products;
-    else __productsCache = null; // keep cache clean if a custom range was used
+    else __productsCache = null;
 
-    // continue with filtering below using local `products`
+    // Filters
     let items = products;
 
     if (category && category.trim()) {
@@ -187,17 +182,17 @@ export async function fetchProducts(
     return items;
   }
 
-  // Use cached products when available and no custom range
-  let items = __productsCache;
+  // Use cache
+  let items = __productsCache!;
 
   if (category && category.trim()) {
     const needle = category.trim().toLowerCase();
-    items = items!.filter((p) => (p.category ?? "").toLowerCase() === needle);
+    items = items.filter((p) => (p.category ?? "").toLowerCase() === needle);
   }
 
   if (q && q.trim()) {
     const needle = q.trim().toLowerCase();
-    items = items!.filter((p) => {
+    items = items.filter((p) => {
       const hay = [
         p.name,
         p.description,
@@ -216,5 +211,5 @@ export async function fetchProducts(
     });
   }
 
-  return items!;
+  return items;
 }
