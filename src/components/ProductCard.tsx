@@ -1,66 +1,66 @@
-// src/components/ProductCard.tsx
-import React from "react";
-import type { Product } from "../types";
+// src/components/PptLookCard.tsx
+import { slideTheme as t } from "../theme/slideTheme";
+import type { ProductRow } from "../api/sheets";
 
-type Props = {
-  product: Product;
-  onSelect?: (p: Product) => void;
-};
+export function PptLookCard({ p, logoUrl }: { p: ProductRow; logoUrl?: string }) {
+  const title = p.name ?? p.product?.name ?? "Untitled product";
+  const thumb = p.thumbnail ?? p.imageUrl ?? p.image;
+  const sku = p.sku ? String(p.sku) : p.code ? String(p.code) : "";
+  const category = p.category ? String(p.category) : "";
 
-const ProductCard: React.FC<Props> = ({ product, onSelect }) => {
-  const title = product.product || "Untitled";
-  const sku = product.sku ? String(product.sku) : "";
-  const category = product.category ? String(product.category) : "";
-  const price =
-    product.price != null && String(product.price).trim() !== ""
-      ? typeof product.price === "number"
-        ? `$${product.price.toFixed(2)}`
-        : String(product.price)
+  const priceText =
+    p.price != null && String(p.price).trim() !== ""
+      ? typeof p.price === "number"
+        ? `$${p.price.toFixed(2)}`
+        : String(p.price)
       : "";
 
   return (
-    <div className="border rounded-2xl p-3 flex gap-3 hover:shadow">
-      {/* Thumbnail */}
-      {product.thumbnail ? (
+    <div
+      style={{
+        fontFamily: t.fontFamily,
+        background: t.cardBg,
+        borderRadius: t.radius,
+        boxShadow: t.cardShadow,
+        padding: "16px",
+        display: "grid",
+        gridTemplateColumns: "140px 1fr",
+        gap: "16px",
+      }}
+    >
+      {thumb ? (
         <img
-          src={String(product.thumbnail)}
+          src={String(thumb)}
           alt={title}
-          className="w-24 h-24 object-cover rounded-xl"
+          style={{ width: 140, height: 140, objectFit: "cover", borderRadius: 12 }}
           loading="lazy"
         />
       ) : (
-        <div className="w-24 h-24 bg-slate-100 rounded-xl" />
+        <div style={{ width: 140, height: 140, borderRadius: 12, background: "#F3F4F6" }} />
       )}
 
-      {/* Details */}
-      <div className="flex-1 min-w-0">
-        <div className="font-medium truncate">{title}</div>
-
-        <div className="text-xs text-slate-500 space-x-2">
-          {sku && <span>SKU: {sku}</span>}
-          {category && <span>Category: {category}</span>}
+      <div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+          <h3 style={{ color: t.title, fontSize: 20, fontWeight: 700, margin: 0 }}>{title}</h3>
+          {logoUrl ? (
+            <img src={logoUrl} alt="Logo" style={{ height: 28, objectFit: "contain", opacity: 0.9 }} />
+          ) : null}
         </div>
 
-        {price && <div className="mt-1 font-semibold">{price}</div>}
+        <div style={{ color: t.meta, fontSize: 12, marginBottom: 8 }}>
+          {sku && <>SKU/Code: {sku} · </>}
+          {category && <>Category: {category}</>}
+        </div>
 
-        {product.description ? (
-          <p className="mt-1 text-sm text-slate-700 line-clamp-2">
-            {String(product.description)}
+        {p.description ? (
+          <p style={{ margin: 0, color: "#374151", lineHeight: 1.4 }}>
+            {String(p.description).slice(0, 220)}
+            {String(p.description).length > 220 ? "…" : ""}
           </p>
         ) : null}
 
-        {onSelect ? (
-          <button
-            type="button"
-            className="mt-2 text-sm px-3 py-1 rounded-lg border hover:bg-slate-50"
-            onClick={() => onSelect(product)}
-          >
-            Select
-          </button>
-        ) : null}
+        {priceText ? <div style={{ marginTop: 10, fontWeight: 700 }}>{priceText}</div> : null}
       </div>
     </div>
   );
-};
-
-export default ProductCard;
+}
