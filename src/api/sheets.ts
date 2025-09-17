@@ -21,17 +21,18 @@ const norm = (s: unknown) =>
     .replace(/[()]/g, ""); // drop parens
 
 function pickByHeader(row: Record<string, any>, candidates: string[]): any {
-  const normalized = Object.fromEntries(
-    Object.keys(row).map((k) => [norm(k), k])
-  );
+  // Build a normalized -> actual key map once for the row
+  const normalized: Record<string, string> = {};
+  for (const k of Object.keys(row)) {
+    normalized[norm(k)] = k;
+  }
   for (const want of candidates) {
     const physicalKey = normalized[want];
-    if (physicalKey != null) return (row as any)[physicalKey];
+    if (physicalKey !== undefined) return row[physicalKey];
   }
   return undefined;
 }
 
-// Canonical header keys (normalized)
 // Your sheet uses: Name, ImageURL, Description, PdfURL, (optional) Code, SpecsBullets
 const H = {
   NAME: ["name", "product", "title"].map(norm),
@@ -140,16 +141,20 @@ export async function fetchProducts(params: ProductFilter = {}): Promise<Product
     }
     if (headerRowIdx === -1) headerRowIdx = 0;
 
-    const rawHeaders = (matrix[headerRowIdx] || []).map((h: any) => String(h ?? "").trim());
-    const dataRows = matrix.slice(headerRowIdx + 1);
+    // Force headers to be string[]
+    const rawHeaders: string[] = (matrix[headerRowIdx] || []).map((h: any) =>
+      String(h ?? "").trim()
+    );
+    const dataRows: any[][] = matrix.slice(headerRowIdx + 1) as any[][];
 
     // Build row objects with a guaranteed string key (fixes TS2538)
     const objects: Record<string, any>[] = dataRows.map((arr: any[]) => {
       const obj: Record<string, any> = {};
-      rawHeaders.forEach((h, i) => {
-        const safeKey = String(h && String(h).trim() ? h : `col_${i}`);
+      for (let i = 0; i < rawHeaders.length; i++) {
+        const h = rawHeaders[i]; // h is string due to typing above
+        const safeKey: string = h && h.length ? h : `col_${i}`;
         obj[safeKey] = arr[i];
-      });
+      }
       return obj;
     });
 
