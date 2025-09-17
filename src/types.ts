@@ -11,39 +11,53 @@ export interface ClientInfo {
   contactPhone?: string;
 }
 
-/** A single product row from Excel */
+/** A single product row from Excel (superset to stay compatible with existing code) */
 export interface Product {
   // Identifiers
   id?: string;
-  code?: string;       // maps from Excel "Code"
+  code?: string;            // Excel "Code"
   sku?: string;
   category?: string;
 
-  // Display
-  name?: string;       // Excel "name"
-  description?: string; // Excel "Description"
-  features?: string[]; // optional future "SpecsBullets" -> bullets
+  // Display / marketing
+  name?: string;            // Excel "name"
+  description?: string;     // Excel "Description"
+  brand?: string;           // used by some components
+  price?: string | number;  // used by some components
 
   // Media
   image?: string;
-  imageUrl?: string;   // Excel "imageurl"
+  imageUrl?: string;        // Excel "imageurl"
   thumbnail?: string;
 
   // Specs / docs
-  pdfUrl?: string;     // Excel "PDFUrl"
+  pdfUrl?: string;          // Excel "PDFUrl"
   specPdfUrl?: string;
+  specs?: string[];         // some utils expect this
+  specifications?: string;  // legacy single-string
+
+  // Links / provenance
+  sourceUrl?: string;
+
+  // Legacy/compat for places that expect nested "product"
+  product?: Product;
+
+  // Extra
+  features?: string[];
+
+  // Allow unknown keys from sheets
+  [key: string]: any;
 }
 
-/** Optional grouping of products (if you use sections) */
+/** Optional grouping of products (some code references this) */
 export interface Section {
   title?: string;
   products?: Product[];
-
-  /** legacy alias — some code may still expect this */
+  /** legacy alias */
   product?: Product;
 }
 
-/** Simple asset placeholder (keep if you reference it elsewhere) */
+/** Simple asset placeholder (keep if referenced elsewhere) */
 export interface Asset {
   url: string;
   type?: string;
