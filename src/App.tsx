@@ -1,8 +1,9 @@
 import React, { useState } from "react";
-import Header from "./components/Header";                     // logo-only, no props
+import Header from "./components/Header";
 import ProjectDetailsCard from "./components/ProjectDetailsCard";
 import ProductGallery from "./components/ProductGallery";
 import type { ClientInfo } from "./types";
+import { useProducts } from "./hooks/useProducts";   // ← NEW
 
 export default function App() {
   const [client, setClient] = useState<ClientInfo>({
@@ -14,12 +15,23 @@ export default function App() {
     contactPhone: "",
   });
 
+  const { products, loading, error } = useProducts(); // ← NEW
+
   return (
     <div className="min-h-screen bg-[#f7f9fc]">
-      <Header />                                              {/* ← no props */}
+      <Header />
       <main className="mx-auto max-w-7xl px-4 py-6 space-y-6">
         <ProjectDetailsCard client={client} setClient={setClient} />
-        <ProductGallery client={client} />                     {/* needed for export */}
+
+        {/* If your ProductGallery already fetches data internally, you can skip props.
+            Otherwise, pass them in like this: */}
+        {loading ? (
+          <div>Loading products…</div>
+        ) : error ? (
+          <div className="text-red-600">Error: {error}</div>
+        ) : (
+          <ProductGallery client={client} products={products} />   {/* ← pass data */}
+        )}
       </main>
     </div>
   );
