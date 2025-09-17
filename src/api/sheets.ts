@@ -1,12 +1,11 @@
 // src/api/sheets.ts
-import * as XLSX from "xlsx";
 import type { Product } from "../types";
 
 export type ProductRow = Product;
 
 export interface ProductFilter {
   q?: string;
-  category?: string;   // kept for future-proofing; your sheet doesn't have category today
+  category?: string;   // future-proofing
   range?: string;      // e.g. "Products!A:Z" or just "Products"
 }
 
@@ -25,22 +24,17 @@ function rowToProductExact(row: Record<string, any>): Product {
     if (specs == null) return undefined;
     const s = String(specs).trim();
     if (!s) return undefined;
-    // Split on newline, semicolon, or comma, and trim
     const parts = s.split(/\r?\n|;|,/).map(t => t.trim()).filter(Boolean);
     return parts.length ? parts : undefined;
   })();
 
   return {
-    // Your sheet doesn’t provide id/code/sku/category—left undefined
     name: name ? String(name) : undefined,
     description: description ? String(description) : undefined,
-
     image: imageURL ? String(imageURL) : undefined,
     imageUrl: imageURL ? String(imageURL) : undefined,   // alias
-
     pdfUrl: pdfURL ? String(pdfURL) : undefined,
     specPdfUrl: pdfURL ? String(pdfURL) : undefined,     // alias
-
     features,
   };
 }
@@ -49,13 +43,15 @@ function rowToProductExact(row: Record<string, any>): Product {
 async function loadAllProducts(range?: string): Promise<Product[]> {
   if (__productsCache && !range) return __productsCache;
 
+  // ✅ dynamic import so bundling is friendlier
+  const XLSX = await import("xlsx");
+
   const res = await fetch("/assets/precero.xlsx", { cache: "no-cache" });
   if (!res.ok) throw new Error(`Failed to fetch Excel: ${res.status}`);
 
   const buf = await res.arrayBuffer();
   const wb = XLSX.read(buf, { type: "array" });
 
-  // Resolve sheet and optional A1 range
   let sheetName: string | undefined;
   let a1: string | undefined;
 
@@ -85,7 +81,6 @@ export async function fetchProducts(params: ProductFilter = {}): Promise<Product
   const { q, category, range } = params;
   let items = await loadAllProducts(range);
 
-  // Category filter is a no-op unless you later add a Category column
   if (category && category.trim()) {
     const needle = category.trim().toLowerCase();
     items = items.filter(p => (p.category ?? "").toLowerCase() === needle);
