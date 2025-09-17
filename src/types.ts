@@ -1,6 +1,6 @@
 // src/types.ts
 
-/** Information entered in the app (not in Google Sheets) */
+/** Information entered in the app (not in Excel) */
 export interface ClientInfo {
   projectName?: string;
   clientName?: string;
@@ -11,51 +11,30 @@ export interface ClientInfo {
   contactPhone?: string;
 }
 
+/** A single product row from Excel */
 export interface Product {
-  name?: string;
-  description?: string;
-  image?: string;
-  imageUrl?: string;
-  pdfUrl?: string;
-  specPdfUrl?: string;
-  code?: string;        // <-- make sure we map this in sheets.ts if you have a "Code" column
+  // Identifiers
+  id?: string;
+  code?: string;       // maps from Excel "Code"
+  sku?: string;
   category?: string;
-  features?: string[];
-}
 
-export interface ClientInfo {
-  projectName?: string;
-  clientName?: string;
-  contactName?: string;
-  contactEmail?: string;
-  contactPhone?: string;
-}
-
-
-  // Display / marketing
-  description?: string;
-  features?: string[];
+  // Display
+  name?: string;       // Excel "name"
+  description?: string; // Excel "Description"
+  features?: string[]; // optional future "SpecsBullets" -> bullets
 
   // Media
-  image?: string;       // direct URL to product image
-  imageUrl?: string;    // alias
-  thumbnail?: string;   // alias
-  specPdfUrl?: string;  // direct PDF link
-  pdfUrl?: string;      // alias
+  image?: string;
+  imageUrl?: string;   // Excel "imageurl"
+  thumbnail?: string;
 
-  // Specs (structured or raw text)
-  specs?: Array<{ label?: string; value?: string }> | string;
-  specifications?: string;
-  price?: string | number;
-
-  // Any extra dynamic keys from the sheet
-  [key: string]: any;
+  // Specs / docs
+  pdfUrl?: string;     // Excel "PDFUrl"
+  specPdfUrl?: string;
 }
 
-/**
- * Logical grouping of products.
- * Older code sometimes referred to a single `product` instead of an array.
- */
+/** Optional grouping of products (if you use sections) */
 export interface Section {
   title?: string;
   products?: Product[];
@@ -64,10 +43,8 @@ export interface Section {
   product?: Product;
 }
 
-/** Asset placeholder (kept for compatibility, can extend if needed) */
+/** Simple asset placeholder (keep if you reference it elsewhere) */
 export interface Asset {
   url: string;
   type?: string;
 }
-
-export type { ClientInfo as default };
