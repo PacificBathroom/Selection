@@ -1,204 +1,123 @@
-// netlify/functions/sheets.js
-const { google } = require("googleapis");
+// src/api/sheets.ts
+import type { Product } from "../types";
 
-// normalize "row 1" labels -> snake_case keys
-const toKey = (s) =>
-  String(s || "")
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, "_")
-    .replace(/[^a-z0-9_]/g, "");
+export type ProductRow = Product;
 
-const ALIASES = {
-  product: ["product", "name", "title"],
-  sku: ["sku", "code"],
-  thumbnail: ["thumbnail", "imageurl", "image_url", "image"],
-  pdf_url: ["pdf_url", "pdfurl", "specpdfurl", "spec_pdf_url", "spec_pdf"],
-  description: ["description", "desc"],
-  category: ["category", "type"],
-  source_url: ["source_url", "url", "link"],
-  contact_name: ["contact_name", "contactname"],
-  contact_email: ["contact_email", "contactemail", "email"],
-  contact_phone: ["contact_phone", "contactphone", "phone"],
-  contact_address: ["contact_address", "contactaddress", "address"],
-  specs_bullets: ["specs_bullets", "specsbullets"],
-};
+export interface ProductFilter {
+  q?: string;
+  category?: string;
+  range?: string; // e.g. "Products!A1:ZZ"
+}
 
-const findKey = (obj, keys) => {
-  for (const k of keys) if (k in obj) return obj[k];
-  return undefined;
-};
-
-exports.handler = async (event) => {
-  try {
-    if (event.httpMethod === "OPTIONS")
-      return { statusCode: 200, headers: cors(), body: "ok" };
-
-    const p = event.queryStringParameters || {};
-    const q = String(p.q || "");
-    const category = String(p.category || "");
-    const debug = String(p.debug || "");
-    // Accept either ?range=Tab!A1:ZZ or ?tab=Tab Name
-    const tabParam = p.tab ? String(p.tab) : "";
-    const rangeParam = p.range ? String(p.range) : "";
-
-    const SHEET_ID = process.env.SHEET_ID;
-    let credsJson = process.env.GOOGLE_CREDENTIALS;
-    if (!credsJson && process.env.GOOGLE_CREDENTIALS_B64) {
-      credsJson = Buffer.from(process.env.GOOGLE_CREDENTIALS_B64, "base64").toString("utf8");
-    }
-    if (!SHEET_ID || !credsJson) {
-      return json(500, { error: "Missing SHEET_ID or GOOGLE_CREDENTIALS(_B64)" });
-    }
-
-    const auth = new google.auth.GoogleAuth({
-      credentials: JSON.parse(credsJson),
-      scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"],
-    });
-    const client = await auth.getClient();
-    const sheets = google.sheets({ version: "v4", auth: client });
-
-    const getTitles = async () => {
-      const meta = await sheets.spreadsheets.get({ spreadsheetId: SHEET_ID });
-      return (meta.data.sheets || [])
-        .map((s) => s.properties && s.properties.title)
-        .filter(Boolean);
-    };
-    const buildRange = (tabName) => {
-      if (!tabName) return "A1:ZZ";
-      const needsQuote = /[^A-Za-z0-9_]/.test(tabName);
-      const quoted = needsQuote ? `'${tabName}'` : tabName;
-      return `${quoted}!A1:ZZ`;
-    };
-
-    let range = rangeParam || (tabParam ? buildRange(tabParam) : "Products!A1:ZZ");
-    let values;
-    let availableSheets = [];
-    try {
-      const resp = await sheets.spreadsheets.values.get({
-        spreadsheetId: SHEET_ID,
-        range,
-        valueRenderOption: "UNFORMATTED_VALUE",
-      });
-      values = resp.data.values || [];
-    } catch (e) {
-      const msg = String(e && e.message ? e.message : e);
-      if (/Unable to parse range|Range not found/i.test(msg)) {
-        availableSheets = await getTitles();
-        if (availableSheets.length) {
-          range = buildRange(availableSheets[0]);
-          const resp2 = await sheets.spreadsheets.values.get({
-            spreadsheetId: SHEET_ID,
-            range,
-            valueRenderOption: "UNFORMATTED_VALUE",
-          });
-          values = resp2.data.values || [];
-        } else {
-          return json(400, { error: "No sheets found in this spreadsheet.", debug: { msg } });
-        }
-      } else {
-        throw e;
-      }
-    }
-
-    if (!values || values.length === 0) {
-      return json(200, {
-        count: 0,
-        items: [],
-        debug: debug ? { rangeUsed: range, availableSheets } : undefined,
-      });
-    }
-
-    const rawHeaders = values[0];
-    const headers = rawHeaders.map(toKey);
-    const rows = values.slice(1);
-
-    // Build raw row objects keyed by normalized header
-    const rawItems = rows.map((row) => {
-      const obj = {};
-      headers.forEach((h, i) => (obj[h] = row[i] != null ? row[i] : ""));
-      return obj;
-    });
-
-    // Canonicalize to app shape
-    const items = rawItems.map((r) => {
-      // convert SpecsBullets (string with newlines) -> specs array
-      const rawSpecs = findKey(r, ALIASES.specs_bullets) || "";
-      const specs =
-        typeof rawSpecs === "string"
-          ? rawSpecs
-              .split(/\r?\n|\u2022/g) // split by newline or bullet char
-              .map((s) => String(s).trim())
-              .filter(Boolean)
-          : undefined;
-
-      return {
-        product: findKey(r, ALIASES.product) || "",
-        sku: findKey(r, ALIASES.sku) || "",
-        thumbnail: findKey(r, ALIASES.thumbnail) || "",
-        pdf_url: findKey(r, ALIASES.pdf_url) || "",
-        description: findKey(r, ALIASES.description) || "",
-        category: findKey(r, ALIASES.category) || "",
-        source_url: findKey(r, ALIASES.source_url) || "",
-        contact_name: findKey(r, ALIASES.contact_name) || "",
-        contact_email: findKey(r, ALIASES.contact_email) || "",
-        contact_phone: findKey(r, ALIASES.contact_phone) || "",
-        contact_address: findKey(r, ALIASES.contact_address) || "",
-        specs,
-        _raw: r, // keep original keys for debugging if needed
-      };
-    });
-
-    // Filters
-    const qn = q.trim().toLowerCase();
-    let filtered = items;
-    if (qn) {
-      const hit = (s) => String(s || "").toLowerCase().includes(qn);
-      filtered = filtered.filter(
-        (it) =>
-          hit(it.product) ||
-          hit(it.sku) ||
-          hit(it.description) ||
-          hit(it.category) ||
-          hit(it.source_url) ||
-          hit(it._raw?.name) || // just in case
-          hit(it._raw?.code)
-      );
-    }
-    const cat = category.trim().toLowerCase();
-    if (cat) filtered = filtered.filter((it) => String(it.category || "").toLowerCase() === cat);
-
-    return json(200, {
-      count: filtered.length,
-      items: filtered,
-      debug: debug
-        ? {
-            rangeUsed: range,
-            availableSheets,
-            rawHeaders,
-            normalizedHeaders: headers,
-            sampleFirst3Items: filtered.slice(0, 3),
-          }
-        : undefined,
-    });
-  } catch (e) {
-    console.error(e);
-    return json(500, { error: String(e && e.message ? e.message : e) });
-  }
-};
-
-function cors() {
+/** --- Helpers to map the Netlify function (Sheets) shape -> Product --- */
+function fnItemToProduct(it: any): Product {
+  // Your function returns keys like: product, thumbnail, pdf_url, description, specs[]
   return {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET,OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
-    "Cache-Control": "no-store",
+    name: it?.product || undefined,
+    description: it?.description || undefined,
+    image: it?.thumbnail || undefined,
+    imageUrl: it?.thumbnail || undefined,
+    pdfUrl: it?.pdf_url || undefined,
+    specPdfUrl: it?.pdf_url || undefined,
+    features: Array.isArray(it?.specs) ? it.specs : undefined,
+    category: it?.category || undefined,
+    sku: it?.sku || undefined,
   };
 }
-function json(status, data) {
-  return {
-    statusCode: status,
-    headers: { ...cors(), "Content-Type": "application/json" },
-    body: JSON.stringify(data),
-  };
+
+/** Try Google Sheets first if env is set and function exists */
+async function fetchFromSheets(params: ProductFilter): Promise<Product[] | null> {
+  const qs = new URLSearchParams();
+  if (params.q) qs.set("q", params.q);
+  if (params.category) qs.set("category", params.category);
+  if (params.range) qs.set("range", params.range);
+
+  // Abort quickly if the function isn't configured
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), 3500);
+
+  try {
+    const res = await fetch(`/api/sheets${qs.size ? `?${qs}` : ""}`, {
+      signal: controller.signal,
+      headers: { "accept": "application/json" },
+    });
+    clearTimeout(t);
+    if (!res.ok) return null; // function exists but not configured
+    const data = await res.json();
+    if (!data || !Array.isArray(data.items)) return null;
+    return data.items.map(fnItemToProduct);
+  } catch {
+    clearTimeout(t);
+    return null; // function missing / timed out / not configured
+  }
+}
+
+/** Fallback: parse the committed Excel file */
+async function fetchFromExcel(range?: string): Promise<Product[]> {
+  const XLSX = await import("xlsx"); // dynamic import keeps bundling happy
+  const res = await fetch("/assets/precero.xlsx", { cache: "no-cache" });
+  if (!res.ok) throw new Error(`Failed to fetch Excel: ${res.status}`);
+  const buf = await res.arrayBuffer();
+  const wb = XLSX.read(buf, { type: "array" });
+
+  let sheetName: string | undefined;
+  let a1: string | undefined;
+  if (range) {
+    if (range.includes("!")) {
+      const [sn, r] = range.split("!");
+      sheetName = sn || undefined; a1 = r || undefined;
+    } else sheetName = range;
+  }
+  if (!sheetName) sheetName = wb.SheetNames[0];
+  const ws = wb.Sheets[sheetName];
+  const rows = XLSX.utils.sheet_to_json<Record<string, any>>(ws, a1 ? { range: a1 } : undefined);
+
+  return rows.map((row) => {
+    const name = row["Name"];
+    const imageURL = row["ImageURL (direct image link)"];
+    const description = row["Description"];
+    const pdfURL = row["PdfURL (direct PDF link)"];
+    const specs = row["SpecsBullets (optional text list)"];
+    const features = specs
+      ? String(specs).split(/\r?\n|;|,/).map(s => s.trim()).filter(Boolean)
+      : undefined;
+    return {
+      name: name ? String(name) : undefined,
+      description: description ? String(description) : undefined,
+      image: imageURL ? String(imageURL) : undefined,
+      imageUrl: imageURL ? String(imageURL) : undefined,
+      pdfUrl: pdfURL ? String(pdfURL) : undefined,
+      specPdfUrl: pdfURL ? String(pdfURL) : undefined,
+      features,
+    } as Product;
+  });
+}
+
+/** Public API */
+export async function fetchProducts(params: ProductFilter = {}): Promise<Product[]> {
+  // 1) Try Sheets function (if configured)
+  const fromSheets = await fetchFromSheets(params);
+  if (fromSheets) return filterClientSide(fromSheets, params);
+
+  // 2) Fallback to Excel in the repo
+  const fromExcel = await fetchFromExcel(params.range);
+  return filterClientSide(fromExcel, params);
+}
+
+function filterClientSide(items: Product[], { q, category }: ProductFilter): Product[] {
+  let out = items;
+  if (category && category.trim()) {
+    const needle = category.trim().toLowerCase();
+    out = out.filter(p => (p.category ?? "").toLowerCase() === needle);
+  }
+  if (q && q.trim()) {
+    const needle = q.trim().toLowerCase();
+    out = out.filter(p => {
+      const hay = [
+        p.name, p.description, p.pdfUrl, p.imageUrl, ...(p.features ?? []),
+      ].filter(Boolean).join(" ").toLowerCase();
+      return hay.includes(needle);
+    });
+  }
+  return out;
 }
