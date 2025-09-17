@@ -25,15 +25,10 @@ const H = {
   NAME: ["name", "product", "title"],
   IMAGE: ["imageurl", "image", "thumbnail"],
   DESC: ["description", "desc"],
-  PDF: ["pdfurl", "pdf", "specpdfurl", "specifications"],
+  PDF:  ["pdfurl", "pdf", "specpdfurl", "specifications"],
+  CODE: ["code", "product_code", "sku"]
 };
 
-function pickByHeader(row: Record<string, any>, candidates: string[]) {
-  for (const [k, v] of Object.entries(row)) {
-    if (candidates.includes(norm(k))) return v;
-  }
-  return undefined;
-}
 
 function toProduct(row: Record<string, any>): Product {
   const name = pickByHeader(row, H.NAME);
