@@ -1,52 +1,51 @@
 // src/utils/pptExporter.ts
-// @ts-ignore – pptxgenjs has loose types by default
+// @ts-ignore
 import PptxGenJS from "pptxgenjs";
 import type { ClientInfo, Product } from "../types";
-// If you already have this util, we use it; otherwise you can stub it to always throw to force bullet fallback.
 import { renderPdfFirstPageToDataUrl } from "../utils/pdfPreview";
 
-/* ========== CONSTANTS & STYLE ========== */
-const SLIDE_W = 13.33; // 16:9 width in inches used by pptxgenjs
+/* ====== slide metrics (16:9) ====== */
+const SLIDE_W = 13.33;
 const SLIDE_H = 7.5;
 
+/* ====== styles ====== */
 const FONT = "Calibri";
 const COLOR_TEXT = "0F172A";
 const COLOR_SUB = "334155";
 const COLOR_MUTED = "64748B";
-const COLOR_FOOTER = "40E0D0"; // turquoise
+const COLOR_FOOTER = "40E0D0";
 
-// Layout: Title at top, image left, specs right, description/code below
+/* ====== geometry ====== */
 const L = {
   title: { x: 0.7, y: 0.55, w: SLIDE_W - 1.4, h: 0.6 },
   img:   { x: 0.6, y: 1.4,  w: 5.8, h: 3.9 },
   specs: { x: 6.9, y: 1.4,  w: 5.8, h: 3.9 },
   desc:  { x: 0.7, y: 5.5,  w: SLIDE_W - 1.4, h: 0.8 },
   code:  { x: 0.7, y: 6.3,  w: SLIDE_W - 1.4, h: 0.4 },
-  footerBar: { x: 0, y: 7.0, w: SLIDE_W, h: 0.3 },
-  footerText: { x: 1.5, y: 7.03, w: SLIDE_W - 1.8, h: 0.3 },
-  footerLogo: { x: 0.3, y: 7.02, w: 1.0, h: 0.3 },
+  footerBar:  { x: 0,    y: 7.0,  w: SLIDE_W, h: 0.3 },
+  footerText: { x: 1.5,  y: 7.03, w: SLIDE_W - 1.8, h: 0.3 },
+  footerLogo: { x: 0.3,  y: 7.02, w: 1.0, h: 0.3 },
 };
 
-const tx = (s: any, text: string | undefined, opts: any) => {
+const tx = (s: any, text?: string, opts?: any) => {
   if (!text) return;
   s.addText(text, {
     fontFace: FONT,
     color: COLOR_TEXT,
     paraSpaceAfter: 0,
-    autoFit: true, // shrink-to-fit
+    autoFit: true,
     ...opts,
   });
 };
 
 const stripDataUrl = (d: string) => d.replace(/^data:[^;]+;base64,/, "");
 
-/** Route any remote file through our Netlify proxy to avoid CORS */
+/* ----- proxy helpers ----- */
 const viaProxy = (u?: string | null) => {
   const s = (u ?? "").toString().trim();
   if (!/^https?:\/\//i.test(s)) return undefined;
   return `/api/pdf-proxy?url=${encodeURIComponent(s)}`;
 };
-
 async function fetchAsDataUrl(u: string): Promise<string> {
   const proxied = viaProxy(u);
   if (!proxied) throw new Error("Bad URL");
@@ -61,8 +60,8 @@ async function fetchAsDataUrl(u: string): Promise<string> {
   });
 }
 
-const autoTitleSize = (name?: string) => {
-  const len = name?.length || 0;
+const autoTitleSize = (t?: string) => {
+  const len = t?.length || 0;
   if (len <= 28) return 24;
   if (len <= 36) return 22;
   if (len <= 48) return 20;
@@ -74,15 +73,15 @@ function first<T = string>(obj: any, keys: string[]): T | "" {
   for (const k of keys) {
     const v =
       obj?.[k] ??
-      obj?.[k.toLowerCase?.()] ??
-      obj?.[k.replace?.(/\s+/g, "")] ??
-      obj?.[k.replace?.(/_/g, "")];
+      obj?.[k?.toLowerCase?.()] ??
+      obj?.[k?.replace?.(/\s+/g, "")] ??
+      obj?.[k?.replace?.(/_/g, "")];
     if (v != null && String(v).trim() !== "") return v as T;
   }
   return "" as unknown as T;
 }
 
-/* ========== EXPORTER ========== */
+/* ====== main exporter ====== */
 export async function exportDeckFromProducts({
   client,
   products,
@@ -93,31 +92,83 @@ export async function exportDeckFromProducts({
   const pptx = new PptxGenJS();
   (pptx as any).layout = "LAYOUT_16x9";
 
-  // COVER SLIDE (optional – simple header so export is never empty)
-  const cover = pptx.addSlide();
-  tx(cover, client.projectName || "Project Selection", {
-    x: 0.8,
-    y: 1.0,
-    w: SLIDE_W - 1.6,
-    h: 0.8,
-    fontSize: 34,
-    bold: true,
-    color: COLOR_TEXT,
+  /* ---- define masters for branded covers/ends ---- */
+  pptx.defineSlideMaster({
+    title: "COVER1",
+    objects: [{ image: { path: "/cover-bg-1.png", x: 0, y: 0, w: SLIDE_W, h: SLIDE_H } }],
   });
-  tx(
-    cover,
-    `Prepared for ${client.clientName || "Client name"}`,
-    { x: 0.8, y: 1.8, w: SLIDE_W - 1.6, h: 0.4, fontSize: 16, color: COLOR_SUB }
-  );
-  tx(
-    cover,
-    client.dateISO
-      ? new Date(client.dateISO).toLocaleDateString()
-      : new Date().toLocaleDateString(),
-    { x: 0.8, y: 2.2, w: SLIDE_W - 1.6, h: 0.3, fontSize: 12, color: COLOR_MUTED }
-  );
+  pptx.defineSlideMaster({
+    title: "COVER2",
+    objects: [{ image: { path: "/cover-bg-2.png", x: 0, y: 0, w: SLIDE_W, h: SLIDE_H } }],
+  });
+  pptx.defineSlideMaster({
+    title: "END1",
+    objects: [{ image: { path: "/end-bg-1.png", x: 0, y: 0, w: SLIDE_W, h: SLIDE_H } }],
+  });
+  pptx.defineSlideMaster({
+    title: "END2",
+    objects: [{ image: { path: "/end-bg-2.png", x: 0, y: 0, w: SLIDE_W, h: SLIDE_H } }],
+  });
 
-  // PRODUCT SLIDES
+  /* ---- COVER 1: title + prepared for ---- */
+  {
+    const s = pptx.addSlide({ masterName: "COVER1" });
+    tx(s, client.projectName || "Project Selection", {
+      x: 0.8,
+      y: 1.0,
+      w: SLIDE_W - 1.6,
+      h: 0.9,
+      fontSize: 34,
+      bold: true,
+    });
+    tx(s, `Prepared for ${client.clientName || "Client name"}`, {
+      x: 0.8,
+      y: 1.9,
+      w: SLIDE_W - 1.6,
+      h: 0.4,
+      fontSize: 16,
+      color: COLOR_SUB,
+    });
+    tx(
+      s,
+      client.dateISO
+        ? new Date(client.dateISO).toLocaleDateString()
+        : new Date().toLocaleDateString(),
+      { x: 0.8, y: 2.3, w: SLIDE_W - 1.6, h: 0.3, fontSize: 12, color: COLOR_MUTED }
+    );
+  }
+
+  /* ---- COVER 2: contact block ---- */
+  {
+    const s = pptx.addSlide({ masterName: "COVER2" });
+    tx(s, client.projectName || "Project Selection", {
+      x: 0.8,
+      y: 1.0,
+      w: SLIDE_W - 1.6,
+      h: 0.8,
+      fontSize: 28,
+      bold: true,
+    });
+    tx(s, client.contactName || "", {
+      x: 0.8,
+      y: 1.7,
+      w: SLIDE_W - 1.6,
+      h: 0.4,
+      fontSize: 16,
+      color: COLOR_SUB,
+    });
+    const contactLine = [client.contactEmail, client.contactPhone].filter(Boolean).join(" · ");
+    tx(s, contactLine, {
+      x: 0.8,
+      y: 2.1,
+      w: SLIDE_W - 1.6,
+      h: 0.4,
+      fontSize: 12,
+      color: COLOR_MUTED,
+    });
+  }
+
+  /* ---- PRODUCT SLIDES ---- */
   for (const raw of products) {
     const title =
       first<string>(raw, ["name", "Name", "product", "Product"]) || "Product";
@@ -131,8 +182,7 @@ export async function exportDeckFromProducts({
     const description =
       first<string>(raw, ["description", "Description"]) || "";
 
-    const code =
-      first<string>(raw, ["code", "Code", "sku", "SKU"]) || "";
+    const code = first<string>(raw, ["code", "Code", "sku", "SKU"]) || "";
 
     const specsText =
       (Array.isArray(raw.specs)
@@ -143,16 +193,15 @@ export async function exportDeckFromProducts({
 
     const s = pptx.addSlide();
 
-    // Title (top)
+    // title
     tx(s, title, {
       ...L.title,
       align: "center",
       bold: true,
       fontSize: autoTitleSize(title),
-      color: COLOR_TEXT,
     });
 
-    // Left image (or placeholder)
+    // image (or placeholder)
     let drewImage = false;
     if (imageUrl) {
       try {
@@ -163,12 +212,9 @@ export async function exportDeckFromProducts({
           sizing: { type: "contain", w: L.img.w, h: L.img.h },
         });
         drewImage = true;
-      } catch {
-        // fall through to placeholder
-      }
+      } catch {}
     }
     if (!drewImage) {
-      // light grey placeholder
       s.addShape(pptx.ShapeType.rect, {
         x: L.img.x,
         y: L.img.y,
@@ -179,7 +225,7 @@ export async function exportDeckFromProducts({
       });
     }
 
-    // Specs: prefer PDF first page; fallback to bullets/text; fallback to placeholder
+    // specs (PDF > text > placeholder)
     let drewSpecs = false;
     if (pdfUrl) {
       try {
@@ -190,19 +236,15 @@ export async function exportDeckFromProducts({
           sizing: { type: "contain", w: L.specs.w, h: L.specs.h },
         });
         drewSpecs = true;
-      } catch {
-        // fall back to text
-      }
+      } catch {}
     }
     if (!drewSpecs && specsText) {
-      // Try to make bullets if possible
       const bullets = String(specsText)
         .split(/\r?\n|•|,|;|\u2022/)
         .map((t) => t.trim())
         .filter(Boolean)
         .map((t) => `• ${t}`)
         .join("\n");
-
       tx(s, bullets, {
         x: L.specs.x,
         y: L.specs.y,
@@ -224,7 +266,7 @@ export async function exportDeckFromProducts({
       });
     }
 
-    // Description (autoshrink inside a fixed box so it can't spill)
+    // description + code
     if (description) {
       tx(s, description, {
         ...L.desc,
@@ -233,18 +275,15 @@ export async function exportDeckFromProducts({
         color: COLOR_SUB,
       });
     }
-
-    // Code line
     if (code) {
       tx(s, code, {
         ...L.code,
         align: "center",
         fontSize: 11,
-        color: COLOR_TEXT,
       });
     }
 
-    // Footer bar + (optional) logo left + label
+    // footer
     s.addShape(pptx.ShapeType.rect, {
       x: L.footerBar.x,
       y: L.footerBar.y,
@@ -253,7 +292,6 @@ export async function exportDeckFromProducts({
       fill: { color: COLOR_FOOTER },
       line: { color: COLOR_FOOTER },
     });
-    // If you have /logo.png in public/
     s.addImage({
       path: "/logo.png",
       x: L.footerLogo.x,
@@ -272,17 +310,9 @@ export async function exportDeckFromProducts({
     });
   }
 
-  // SIMPLE END SLIDE
-  const end = pptx.addSlide();
-  tx(end, "Thank you", {
-    x: 0.8,
-    y: 3.2,
-    w: SLIDE_W - 1.6,
-    h: 0.8,
-    align: "center",
-    bold: true,
-    fontSize: 28,
-  });
+  /* ---- END SLIDES ---- */
+  pptx.addSlide({ masterName: "END1" });
+  pptx.addSlide({ masterName: "END2" });
 
   await pptx.writeFile({
     fileName: `${client.projectName || "Project Selection"}.pptx`,
