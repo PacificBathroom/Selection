@@ -1,13 +1,11 @@
 [build]
-  command = "npm install && npm run build"
+  command = "npm install --no-audit --no-fund --loglevel verbose && npm run build"
   publish = "dist"
-  functions = "netlify/functions"
 
 [functions]
   directory = "netlify/functions"
   node_bundler = "esbuild"
 
-# must be BEFORE the SPA fallback
 [[redirects]]
   from = "/api/*"
   to   = "/.netlify/functions/:splat"
