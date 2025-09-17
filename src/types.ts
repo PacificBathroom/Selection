@@ -11,14 +11,26 @@ export interface ClientInfo {
   contactPhone?: string;
 }
 
-/** A single product row from Google Sheets */
 export interface Product {
-  // Basic identifiers
-  id?: string;
   name?: string;
-  code?: string;
-  sku?: string;
+  description?: string;
+  image?: string;
+  imageUrl?: string;
+  pdfUrl?: string;
+  specPdfUrl?: string;
+  code?: string;        // <-- make sure we map this in sheets.ts if you have a "Code" column
   category?: string;
+  features?: string[];
+}
+
+export interface ClientInfo {
+  projectName?: string;
+  clientName?: string;
+  contactName?: string;
+  contactEmail?: string;
+  contactPhone?: string;
+}
+
 
   // Display / marketing
   description?: string;
