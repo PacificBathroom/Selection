@@ -1,6 +1,9 @@
 // src/api/exportPptx.ts
-import PptxGenJS, { TextProps } from "pptxgenjs";
+import PptxGenJS from "pptxgenjs";
 import type { Product, ClientInfo } from "@/types";
+
+// Re-export the typing in a safe way for current pptxgenjs versions
+type TextProps = PptxGenJS.TextProps;
 
 /** Fetch a URL and convert to data: URL so it embeds in PPTX */
 async function urlToDataUrl(url?: string): Promise<string | undefined> {
@@ -19,34 +22,10 @@ async function urlToDataUrl(url?: string): Promise<string | undefined> {
   }
 }
 
-/** Try to render the first page of a PDF to a PNG data URL (browser only). Falls back to undefined. */
-async function pdfFirstPageToPngDataUrl(pdfUrl?: string): Promise<string | undefined> {
-  if (!pdfUrl) return undefined;
-  try {
-    // dynamic import ensures this only runs client-side
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const pdfjs: any = await import("pdfjs-dist/build/pdf");
-    const loadingTask = pdfjs.getDocument(pdfUrl);
-    const pdf = await loadingTask.promise;
-    const page = await pdf.getPage(1);
-
-    const viewport = page.getViewport({ scale: 1.3 });
-    const canvas = document.createElement("canvas");
-    const ctx = canvas.getContext("2d")!;
-    canvas.width = viewport.width;
-    canvas.height = viewport.height;
-
-    await page.render({ canvasContext: ctx, viewport }).promise;
-    return canvas.toDataURL("image/png");
-  } catch {
-    return undefined; // caller will add a hyperlink instead
-  }
-}
-
 /**
  * Build a PPTX deck with:
  *  - Cover slide (project/client/contact)
- *  - One slide per product (Image, Specs preview image or link, Name, Description, Code)
+ *  - One slide per product (Image, Specs link, Name, Description, Code)
  *  - Back slide (contact details)
  * Text boxes use shrinkText so long content auto-sizes instead of overflowing.
  */
@@ -109,24 +88,19 @@ export async function exportPptx(products: Product[], client: ClientInfo) {
       slide.addImage({ data: imgData, x: 5.3, y: 0.5, w: 4.0, h: 3.0 });
     }
 
-    // SPECS area (right bottom) ← first page of PDF as image (fallback hyperlink)
+    // SPECS area (right bottom) ← link to PDF
     const pdfUrl = p.pdfUrl || p.specPdfUrl || p.product?.pdfUrl || p.product?.specPdfUrl;
     if (pdfUrl) {
-      const pdfImgData = await pdfFirstPageToPngDataUrl(pdfUrl);
-      if (pdfImgData) {
-        slide.addImage({ data: pdfImgData, x: 5.3, y: 3.7, w: 4.0, h: 2.5 });
-      } else {
-        slide.addText("View Specs", {
-          x: 5.3,
-          y: 3.7,
-          w: 4.0,
-          h: 0.5,
-          fontSize: 12,
-          color: "0070C0",
-          underline: true,
-          hyperlink: { url: pdfUrl },
-        });
-      }
+      slide.addText("View Specs", {
+        x: 5.3,
+        y: 3.7,
+        w: 4.0,
+        h: 0.5,
+        fontSize: 12,
+        color: "0070C0",
+        underline: true,
+        hyperlink: { url: pdfUrl },
+      });
     }
   }
 
