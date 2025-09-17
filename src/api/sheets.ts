@@ -21,15 +21,18 @@ const norm = (s: unknown) =>
     .replace(/[()]/g, ""); // drop parens
 
 function pickByHeader(row: Record<string, any>, candidates: string[]): any {
-  for (const key of Object.keys(row)) {
-    if (candidates.includes(norm(key))) {
-      return (row as any)[key];
-    }
+  const normalized = Object.fromEntries(
+    Object.keys(row).map((k) => [norm(k), k])
+  );
+  for (const want of candidates) {
+    const physicalKey = normalized[want];
+    if (physicalKey != null) return (row as any)[physicalKey];
   }
   return undefined;
 }
 
 // Canonical header keys (normalized)
+// Your sheet uses: Name, ImageURL, Description, PdfURL, (optional) Code, SpecsBullets
 const H = {
   NAME: ["name", "product", "title"].map(norm),
   IMAGE: ["imageurl", "image", "thumbnail"].map(norm),
@@ -48,7 +51,7 @@ function toProduct(row: Record<string, any>): Product {
   const specs = pickByHeader(row, H.SPECS);
 
   let features: string[] | undefined;
-  if (specs) {
+  if (specs != null) {
     const s = String(specs).trim();
     if (s) {
       features = s
@@ -61,21 +64,28 @@ function toProduct(row: Record<string, any>): Product {
   const product: Product = {
     name: name ? String(name) : undefined,
     description: description ? String(description) : undefined,
+
+    // Image box (and UI cards) use this URL
     image: image ? String(image) : undefined,
     imageUrl: image ? String(image) : undefined,
+
+    // Specs link (used as a hyperlink in the PPT)
     pdfUrl: pdf ? String(pdf) : undefined,
     specPdfUrl: pdf ? String(pdf) : undefined,
+
+    // Optional code/sku if present
     code: code ? String(code) : undefined,
+
     features,
   };
 
-  // legacy alias for code that reads p.product?.field
-  product.product = product;
+  // legacy alias for any code that reads p.product?.field
+  (product as any).product = product;
 
   return product;
 }
 
-/* ---------- workbook loader with header detection ---------- */
+/* ---------- public loader (reads workbook and applies filters) ---------- */
 export async function fetchProducts(params: ProductFilter = {}): Promise<Product[]> {
   const { q, category, range } = params;
 
@@ -110,7 +120,7 @@ export async function fetchProducts(params: ProductFilter = {}): Promise<Product
     const ws = wb.Sheets[sheetName];
     if (!ws) throw new Error(`Sheet "${sheetName}" not found`);
 
-    // Read as matrix to auto-find header row (one that contains "name")
+    // Read as matrix to auto-find header row (row that contains "Name")
     const matrix = XLSX.utils.sheet_to_json(ws, {
       header: 1,
       defval: "",
@@ -133,16 +143,15 @@ export async function fetchProducts(params: ProductFilter = {}): Promise<Product
     const rawHeaders = (matrix[headerRowIdx] || []).map((h: any) => String(h ?? "").trim());
     const dataRows = matrix.slice(headerRowIdx + 1);
 
-    // Build objects while skipping empty headers and generating safe keys
+    // Build row objects with a guaranteed string key (fixes TS2538)
     const objects: Record<string, any>[] = dataRows.map((arr: any[]) => {
-  const obj: Record<string, any> = {};
-  rawHeaders.forEach((h, i) => {
-    const safeKey = String(h && String(h).trim() ? h : `col_${i}`);
-    obj[safeKey] = arr[i];
-  });
-  return obj;
-});
-
+      const obj: Record<string, any> = {};
+      rawHeaders.forEach((h, i) => {
+        const safeKey = String(h && String(h).trim() ? h : `col_${i}`);
+        obj[safeKey] = arr[i];
+      });
+      return obj;
+    });
 
     const products = objects
       .map(toProduct)
@@ -151,14 +160,15 @@ export async function fetchProducts(params: ProductFilter = {}): Promise<Product
     if (!range) __productsCache = products;
     else __productsCache = null;
 
-    // Filters
     let items = products;
 
+    // Optional category filter (no-op unless you add a Category column later)
     if (category && category.trim()) {
       const needle = category.trim().toLowerCase();
       items = items.filter((p) => (p.category ?? "").toLowerCase() === needle);
     }
 
+    // Text search across common fields
     if (q && q.trim()) {
       const needle = q.trim().toLowerCase();
       items = items.filter((p) => {
@@ -168,10 +178,7 @@ export async function fetchProducts(params: ProductFilter = {}): Promise<Product
           p.pdfUrl,
           p.imageUrl,
           p.code,
-          p.brand,
-          p.specifications,
-          ...(Array.isArray(p.specs) ? p.specs.map((s) => (typeof s === "string" ? s : `${s.label} ${s.value}`)) : []),
-          ...(p.features ?? []),
+          ...(Array.isArray(p.features) ? p.features : []),
         ]
           .filter(Boolean)
           .join(" ")
@@ -200,10 +207,7 @@ export async function fetchProducts(params: ProductFilter = {}): Promise<Product
         p.pdfUrl,
         p.imageUrl,
         p.code,
-        p.brand,
-        p.specifications,
-        ...(Array.isArray(p.specs) ? p.specs.map((s) => (typeof s === "string" ? s : `${s.label} ${s.value}`)) : []),
-        ...(p.features ?? []),
+        ...(Array.isArray(p.features) ? p.features : []),
       ]
         .filter(Boolean)
         .join(" ")
