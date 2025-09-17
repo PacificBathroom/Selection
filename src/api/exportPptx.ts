@@ -1,14 +1,12 @@
 // src/api/exportPptx.ts
-// Uses PptxGenJS to export slides with product + app info
-
-// @ts-ignore
-import PptxGenJS from "pptxgenjs";
+import PptxGenJS, { TextProps } from "pptxgenjs";
 import type { Product, ClientInfo } from "../types";
 
-// helper: fetch image as dataURL (so it embeds)
-async function urlToDataUrl(url: string): Promise<string | undefined> {
+/** fetch as DataURL so images embed into PPTX */
+async function urlToDataUrl(url?: string): Promise<string | undefined> {
+  if (!url) return undefined;
   try {
-    const res = await fetch(url);
+    const res = await fetch(url, { mode: "cors" });
     if (!res.ok) return undefined;
     const blob = await res.blob();
     return await new Promise((resolve) => {
@@ -21,120 +19,130 @@ async function urlToDataUrl(url: string): Promise<string | undefined> {
   }
 }
 
-// helper: render PDF first page as image
-async function pdfToImage(url: string): Promise<string | undefined> {
+/** Try to render the first page of a PDF to an image dataURL */
+async function pdfFirstPageToPngDataUrl(pdfUrl?: string): Promise<string | undefined> {
+  if (!pdfUrl) return undefined;
   try {
-    const pdfjsLib = await import("pdfjs-dist");
-    const pdf = await pdfjsLib.getDocument(url).promise;
+    // dynamic import so it only runs in the browser
+    const pdfjs: any = await import("pdfjs-dist/build/pdf");
+    // In some bundlers we may need a worker, but try without first:
+    // pdfjs.GlobalWorkerOptions.workerSrc = 'pdf.worker.min.js'; // optional if needed
+
+    const loadingTask = pdfjs.getDocument(pdfUrl);
+    const pdf = await loadingTask.promise;
     const page = await pdf.getPage(1);
-    const viewport = page.getViewport({ scale: 1.5 });
+
+    const viewport = page.getViewport({ scale: 1.3 });
     const canvas = document.createElement("canvas");
     const ctx = canvas.getContext("2d")!;
     canvas.width = viewport.width;
     canvas.height = viewport.height;
+
     await page.render({ canvasContext: ctx, viewport }).promise;
     return canvas.toDataURL("image/png");
   } catch {
+    // fallback will be a hyperlink text
     return undefined;
   }
 }
 
 /**
- * Export products into a PPTX
+ * Export products into a PPTX deck with:
+ *  - Cover slide (project/client/contact)
+ *  - One slide per product:
+ *      Image box  <- product.imageUrl
+ *      Specs area <- first page of product.pdfUrl rendered as image (fallback: link)
+ *      Product name <- product.name
+ *      Description  <- product.description (auto-shrink)
+ *      Product code <- product.code
+ *  - Back slide with contact details
  */
-export async function exportPptx(
-  products: Product[],
-  client: ClientInfo
-) {
+export async function exportPptx(products: Product[], client: ClientInfo) {
   const pptx = new PptxGenJS();
 
-  // --- Cover slide ---
-  const cover = pptx.addSlide();
-  cover.addText(`Product Presentation for ${client.projectName ?? ""}`, {
-    x: 0.5, y: 0.5, fontSize: 28, bold: true,
-  });
-  cover.addText(`${client.clientName ?? ""}`, {
-    x: 0.5, y: 1.2, fontSize: 20,
-  });
-  cover.addText(`Your Pacific Bathroom Contact: ${client.contactName ?? ""}`, {
-    x: 0.5, y: 2.0, fontSize: 16,
-  });
-  if (client.contactEmail) {
-    cover.addText(client.contactEmail, { x: 0.5, y: 2.5, fontSize: 14 });
-  }
-  if (client.contactPhone) {
-    cover.addText(client.contactPhone, { x: 0.5, y: 2.9, fontSize: 14 });
+  // -------- Cover slide --------
+  {
+    const slide = pptx.addSlide();
+    slide.addText(`Product Presentation`, {
+      x: 0.5, y: 0.5, fontSize: 28, bold: true,
+    });
+    if (client.projectName) {
+      slide.addText(`Project: ${client.projectName}`, {
+        x: 0.5, y: 1.2, fontSize: 20,
+      });
+    }
+    if (client.clientName) {
+      slide.addText(`Client: ${client.clientName}`, {
+        x: 0.5, y: 1.7, fontSize: 18,
+      });
+    }
+    const contacts: string[] = [];
+    if (client.contactName) contacts.push(client.contactName);
+    if (client.contactEmail) contacts.push(client.contactEmail);
+    if (client.contactPhone) contacts.push(client.contactPhone);
+    if (contacts.length) {
+      slide.addText(`Contact: ${contacts.join(" • ")}`, {
+        x: 0.5, y: 2.3, fontSize: 14,
+      });
+    }
   }
 
-  // --- Product slides ---
+  // Common text styling with auto-shrink
+  const titleTextProps: TextProps = { fontSize: 22, bold: true, shrinkText: true };
+  const bodyTextProps: TextProps = { fontSize: 14, shrinkText: true, valign: "top" as const };
+
+  // -------- Product slides --------
   for (const p of products) {
     const slide = pptx.addSlide();
 
-    // Product Name
+    // Product name (top-left)
     if (p.name) {
-      slide.addText(p.name, {
-        x: 0.5, y: 0.3, w: 4, h: 0.5,
-        fontSize: 20, bold: true,
-        shrinkText: true, // auto-shrink if too long
-      });
+      slide.addText(p.name, { x: 0.5, y: 0.3, w: 4.6, h: 0.6, ...titleTextProps });
     }
 
-    // Product Code
+    // Product code (under title)
     if (p.code) {
-      slide.addText(`Code: ${p.code}`, {
-        x: 0.5, y: 0.9, w: 4, h: 0.4,
-        fontSize: 14, italic: true,
-        shrinkText: true,
-      });
+      slide.addText(`Code: ${p.code}`, { x: 0.5, y: 1.0, w: 4.6, h: 0.4, fontSize: 14, italic: true, shrinkText: true });
     }
 
-    // Description
+    // Description (left column)
     if (p.description) {
-      slide.addText(p.description, {
-        x: 0.5, y: 1.5, w: 4.5, h: 3,
-        fontSize: 14,
-        valign: "top",
-        shrinkText: true, // ensures text stays inside box
-      });
+      slide.addText(p.description, { x: 0.5, y: 1.6, w: 4.6, h: 3.2, ...bodyTextProps });
     }
 
-    // Image (from URL)
-    if (p.imageUrl) {
-      const imgData = await urlToDataUrl(p.imageUrl);
-      if (imgData) {
-        slide.addImage({ data: imgData, x: 5.2, y: 0.5, w: 4, h: 3 });
-      }
+    // Image box (right top) ← imageurl
+    const mainImg = await urlToDataUrl(p.imageUrl || p.image);
+    if (mainImg) {
+      slide.addImage({ data: mainImg, x: 5.3, y: 0.5, w: 4.0, h: 3.0 });
     }
 
-    // Specs (PDF preview)
-    if (p.pdfUrl) {
-      const pdfImg = await pdfToImage(p.pdfUrl);
+    // SPECS area (right bottom) ← first page of PDF as image (fallback hyperlink)
+    if (p.pdfUrl || p.specPdfUrl) {
+      const pdfImg = await pdfFirstPageToPngDataUrl(p.pdfUrl || p.specPdfUrl);
       if (pdfImg) {
-        slide.addImage({ data: pdfImg, x: 5.2, y: 3.7, w: 4, h: 2.5 });
-      } else {
-        // fallback: just add a clickable text link
+        slide.addImage({ data: pdfImg, x: 5.3, y: 3.7, w: 4.0, h: 2.5 });
+      } else if (p.pdfUrl || p.specPdfUrl) {
         slide.addText("View Specs", {
-          x: 5.2, y: 3.7, w: 4, h: 0.5,
+          x: 5.3, y: 3.7, w: 4.0, h: 0.5,
           fontSize: 12, color: "0070C0", underline: true,
-          hyperlink: { url: p.pdfUrl },
+          hyperlink: { url: (p.pdfUrl || p.specPdfUrl)! },
         });
       }
     }
   }
 
-  // --- Back slide ---
-  const back = pptx.addSlide();
-  back.addText("Thank you", { x: 3, y: 1, fontSize: 28, bold: true });
-  back.addText(`Contact: ${client.contactName ?? ""}`, {
-    x: 3, y: 2, fontSize: 18,
-  });
-  if (client.contactEmail) {
-    back.addText(client.contactEmail, { x: 3, y: 2.5, fontSize: 14 });
-  }
-  if (client.contactPhone) {
-    back.addText(client.contactPhone, { x: 3, y: 3.0, fontSize: 14 });
+  // -------- Back slide --------
+  {
+    const slide = pptx.addSlide();
+    slide.addText("Thank you", { x: 0.5, y: 0.6, fontSize: 26, bold: true });
+    const parts: string[] = [];
+    if (client.contactName) parts.push(client.contactName);
+    if (client.contactEmail) parts.push(client.contactEmail);
+    if (client.contactPhone) parts.push(client.contactPhone);
+    if (parts.length) {
+      slide.addText(parts.join("   •   "), { x: 0.5, y: 1.4, fontSize: 14 });
+    }
   }
 
-  // Save file
-  await pptx.writeFile("Product-Presentation.pptx");
+  await pptx.writeFile({ fileName: "Product-Presentation.pptx" });
 }
