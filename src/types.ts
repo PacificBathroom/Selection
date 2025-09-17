@@ -11,45 +11,51 @@ export interface ClientInfo {
   contactPhone?: string;
 }
 
-/** A single product row from Excel (superset to stay compatible with existing code) */
+/** Product row (superset so existing components still compile) */
 export interface Product {
   // Identifiers
   id?: string;
-  code?: string;            // Excel "Code"
+  code?: string;                 // Excel "Code"
   sku?: string;
   category?: string;
 
-  // Display / marketing
-  name?: string;            // Excel "name"
-  description?: string;     // Excel "Description"
-  brand?: string;           // used by some components
-  price?: string | number;  // used by some components
+  // Display
+  name?: string;                 // Excel "name"
+  description?: string;          // Excel "Description"
+  brand?: string;                // used by some components
+  price?: string | number;       // used by some components
 
   // Media
   image?: string;
-  imageUrl?: string;        // Excel "imageurl"
+  imageUrl?: string;             // Excel "imageurl"
   thumbnail?: string;
 
   // Specs / docs
-  pdfUrl?: string;          // Excel "PDFUrl"
+  pdfUrl?: string;               // Excel "PDFUrl"
   specPdfUrl?: string;
-  specs?: string[];         // some utils expect this
-  specifications?: string;  // legacy single-string
+  /**
+   * Some code expects string[]; your seed data sometimes uses
+   * {label, value}. Support both to avoid compile errors.
+   */
+  specs?: Array<string | { label: string; value: string }>;
+  specifications?: string;       // legacy single-string spec blob
+  features?: string[];           // optional parsed bullets
 
   // Links / provenance
   sourceUrl?: string;
 
-  // Legacy/compat for places that expect nested "product"
+  /**
+   * Legacy compatibility for code that does p.product?.field.
+   * NOTE: React cannot render objects directly (e.g. {p.product}),
+   * so components should read a field like p.product?.name.
+   */
   product?: Product;
 
-  // Extra
-  features?: string[];
-
-  // Allow unknown keys from sheets
+  // Allow unknown keys from spreadsheets
   [key: string]: any;
 }
 
-/** Optional grouping of products (some code references this) */
+/** Optional grouping of products some views reference */
 export interface Section {
   title?: string;
   products?: Product[];
@@ -57,7 +63,7 @@ export interface Section {
   product?: Product;
 }
 
-/** Simple asset placeholder (keep if referenced elsewhere) */
+/** Simple asset placeholder */
 export interface Asset {
   url: string;
   type?: string;
