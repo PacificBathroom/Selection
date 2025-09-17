@@ -17,23 +17,24 @@ const norm = (s: unknown) =>
   String(s ?? "")
     .trim()
     .toLowerCase()
-    .replace(/\s+/g, "") // remove spaces
-    .replace(/[()]/g, ""); // drop parens
+    .replace(/\s+/g, "")
+    .replace(/[()]/g, "");
 
 function pickByHeader(row: Record<string, any>, candidates: string[]): any {
   // Build a normalized -> actual key map once for the row
   const normalized: Record<string, string> = {};
   for (const k of Object.keys(row)) {
-    normalized[norm(k)] = k;
+    const nk = norm(k);
+    normalized[nk] = k; // nk is always a string
   }
   for (const want of candidates) {
-    const physicalKey = normalized[want];
-    if (physicalKey !== undefined) return row[physicalKey];
+    const physicalKey = normalized[want]; // string | undefined
+    if (typeof physicalKey === "string") return row[physicalKey];
   }
   return undefined;
 }
 
-// Your sheet uses: Name, ImageURL, Description, PdfURL, (optional) Code, SpecsBullets
+// Your sheet columns: Name, ImageURL, Description, PdfURL, (optional) Code, SpecsBullets
 const H = {
   NAME: ["name", "product", "title"].map(norm),
   IMAGE: ["imageurl", "image", "thumbnail"].map(norm),
@@ -74,129 +75,109 @@ function toProduct(row: Record<string, any>): Product {
     pdfUrl: pdf ? String(pdf) : undefined,
     specPdfUrl: pdf ? String(pdf) : undefined,
 
-    // Optional code/sku if present
+    // Optional product code
     code: code ? String(code) : undefined,
 
     features,
   };
 
-  // legacy alias for any code that reads p.product?.field
+  // Back-compat: some UI code reads p.product.<field>
   (product as any).product = product;
 
   return product;
 }
 
-/* ---------- public loader (reads workbook and applies filters) ---------- */
-export async function fetchProducts(params: ProductFilter = {}): Promise<Product[]> {
-  const { q, category, range } = params;
+/* ---------- loader ---------- */
+async function loadAllProducts(range?: string): Promise<Product[]> {
+  // Only cache when no custom range is used
+  if (__productsCache && !range) return __productsCache;
 
-  if (!__productsCache || range) {
-    const XLSX: any = await import("xlsx");
-    const res = await fetch("/assets/precero.xlsx", { cache: "no-cache" });
-    if (!res.ok) throw new Error(`Failed to fetch Excel: ${res.status}`);
+  const XLSX: any = await import("xlsx");
+  const res = await fetch("/assets/precero.xlsx", { cache: "no-cache" });
+  if (!res.ok) throw new Error(`Failed to fetch Excel: ${res.status}`);
 
-    const buf = await res.arrayBuffer();
-    const wb = XLSX.read(buf, { type: "array" });
+  const buf = await res.arrayBuffer();
+  const wb = XLSX.read(buf, { type: "array" });
 
-    // Resolve sheet + optional A1 range
-    let sheetName: string | undefined;
-    let a1: string | undefined;
+  // Resolve sheet + optional A1 range
+  let sheetName: string | undefined;
+  let a1: string | undefined;
 
-    if (range) {
-      if (range.includes("!")) {
-        const [sn, r] = range.split("!");
-        sheetName = sn || undefined;
-        a1 = r || undefined;
-      } else if (/^[A-Z]+(?:\d+)?:[A-Z]+(?:\d+)?$/i.test(range)) {
-        a1 = range;
-      } else {
-        sheetName = range;
-      }
+  if (range) {
+    if (range.includes("!")) {
+      const [sn, r] = range.split("!");
+      sheetName = sn || undefined;
+      a1 = r || undefined;
+    } else if (/^[A-Z]+(?:\d+)?:[A-Z]+(?:\d+)?$/i.test(range)) {
+      a1 = range;
+    } else {
+      sheetName = range;
     }
-    if (!sheetName) {
-      sheetName =
-        wb.SheetNames.find((n: string) => n.toLowerCase() === "products") || wb.SheetNames[0];
-    }
-
-    const ws = wb.Sheets[sheetName];
-    if (!ws) throw new Error(`Sheet "${sheetName}" not found`);
-
-    // Read as matrix to auto-find header row (row that contains "Name")
-    const matrix = XLSX.utils.sheet_to_json(ws, {
-      header: 1,
-      defval: "",
-      blankrows: false,
-      ...(a1 ? { range: a1 } : {}),
-    }) as unknown as any[][];
-
-    if (!Array.isArray(matrix) || matrix.length === 0) return [];
-
-    let headerRowIdx = -1;
-    for (let i = 0; i < Math.min(matrix.length, 50); i++) {
-      const row = matrix[i] || [];
-      if (row.some((cell: any) => norm(cell) === "name")) {
-        headerRowIdx = i;
-        break;
-      }
-    }
-    if (headerRowIdx === -1) headerRowIdx = 0;
-
-    // Force headers to be string[]
-    const rawHeaders: string[] = (matrix[headerRowIdx] || []).map((h: any) =>
-      String(h ?? "").trim()
-    );
-    const dataRows: any[][] = matrix.slice(headerRowIdx + 1) as any[][];
-
-    // Build row objects with a guaranteed string key (fixes TS2538)
-    const objects: Record<string, any>[] = dataRows.map((arr: any[]) => {
-      const obj: Record<string, any> = {};
-      for (let i = 0; i < rawHeaders.length; i++) {
-        const h = rawHeaders[i]; // h is string due to typing above
-        const safeKey: string = h && h.length ? h : `col_${i}`;
-        obj[safeKey] = arr[i];
-      }
-      return obj;
-    });
-
-    const products = objects
-      .map(toProduct)
-      .filter((p) => p.name || p.description || p.imageUrl || p.pdfUrl);
-
-    if (!range) __productsCache = products;
-    else __productsCache = null;
-
-    let items = products;
-
-    // Optional category filter (no-op unless you add a Category column later)
-    if (category && category.trim()) {
-      const needle = category.trim().toLowerCase();
-      items = items.filter((p) => (p.category ?? "").toLowerCase() === needle);
-    }
-
-    // Text search across common fields
-    if (q && q.trim()) {
-      const needle = q.trim().toLowerCase();
-      items = items.filter((p) => {
-        const hay = [
-          p.name,
-          p.description,
-          p.pdfUrl,
-          p.imageUrl,
-          p.code,
-          ...(Array.isArray(p.features) ? p.features : []),
-        ]
-          .filter(Boolean)
-          .join(" ")
-          .toLowerCase();
-        return hay.includes(needle);
-      });
-    }
-
-    return items;
+  }
+  if (!sheetName) {
+    sheetName =
+      wb.SheetNames.find((n: string) => n.toLowerCase() === "products") || wb.SheetNames[0];
   }
 
-  // Use cache
-  let items = __productsCache!;
+  const ws = wb.Sheets[sheetName];
+  if (!ws) throw new Error(`Sheet "${sheetName}" not found`);
+
+  // Read as matrix (header:1) so we can detect header row containing "Name"
+  const matrix = XLSX.utils.sheet_to_json(ws, {
+    header: 1,
+    defval: "",
+    blankrows: false,
+    ...(a1 ? { range: a1 } : {}),
+  }) as unknown as any[][];
+
+  if (!Array.isArray(matrix) || matrix.length === 0) {
+    if (!range) __productsCache = [];
+    return [];
+  }
+
+  // Find header row (first row where any cell normalizes to 'name'), else assume first row
+  let headerRowIdx = -1;
+  for (let i = 0; i < Math.min(matrix.length, 50); i++) {
+    const row = Array.isArray(matrix[i]) ? matrix[i] : [];
+    if (row.some((cell: any) => norm(cell) === "name")) {
+      headerRowIdx = i;
+      break;
+    }
+  }
+  if (headerRowIdx === -1) headerRowIdx = 0;
+
+  // Force headers to string[]
+  const rawHeaders: string[] = (Array.isArray(matrix[headerRowIdx]) ? matrix[headerRowIdx] : [])
+    .map((h: any) => String(h ?? "").trim());
+
+  // Data rows after header
+  const dataRows: any[][] = matrix.slice(headerRowIdx + 1).map((r) => (Array.isArray(r) ? r : []));
+
+  // Build objects with GUARANTEED string keys
+  const objects: Record<string, any>[] = dataRows.map((arr: any[]) => {
+    const obj: Record<string, any> = {};
+    for (let i = 0; i < rawHeaders.length; i++) {
+      const headerCandidate = rawHeaders[i];
+      const safeKey: string = headerCandidate && headerCandidate.length ? headerCandidate : `col_${i}`;
+      // Always assign using a string key
+      obj[safeKey] = i < arr.length ? arr[i] : "";
+    }
+    return obj;
+  });
+
+  const products = objects
+    .map(toProduct)
+    .filter((p) => p.name || p.description || p.imageUrl || p.pdfUrl);
+
+  if (!range) __productsCache = products;
+
+  return products;
+}
+
+/* ---------- public API ---------- */
+export async function fetchProducts(params: ProductFilter = {}): Promise<Product[]> {
+  const { q, category, range } = params;
+  let items = await loadAllProducts(range);
 
   if (category && category.trim()) {
     const needle = category.trim().toLowerCase();
