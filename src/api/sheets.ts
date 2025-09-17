@@ -60,15 +60,19 @@ async function loadAllProducts(range?: string): Promise<Product[]> {
       sheetName = range;
     }
   } else {
-    sheetName = wb.SheetNames[0]; // always defined now
+    sheetName = wb.SheetNames[0]; // always defined
   }
 
   const ws = wb.Sheets[sheetName];
   if (!ws) throw new Error(`Sheet "${sheetName}" not found`);
 
-  // 👇 remove the type argument to satisfy TS
-  const rows = XLSX.utils.sheet_to_json(ws, a1 ? { range: a1 } : undefined) as Record<string, any>[];
+  // Cast result instead of using type argument
+  const rows = XLSX.utils.sheet_to_json(ws, a1 ? { range: a1 } : undefined) as Record<
+    string,
+    any
+  >[];
 
+  const products = rows.map(rowToProduct);
 
   if (!range) __productsCache = products;
   return products;
