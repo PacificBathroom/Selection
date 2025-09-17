@@ -3,6 +3,9 @@ import Header from "./components/Header";
 import ProjectDetailsCard from "./components/ProjectDetailsCard";
 import ProductGallery from "./components/ProductGallery";
 import type { ClientInfo } from "./types";
+import { exportSelectionToPptx } from "./api/exportPptx";
+import type { Product } from "./types";
+import React from "react";
 import { useProducts } from "./hooks/useProducts";   // ← NEW
 
 export default function App() {
