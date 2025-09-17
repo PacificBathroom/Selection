@@ -1,3 +1,4 @@
+// src/api/sheets.ts
 import type { Product } from "../types";
 
 export type ProductRow = Product;
@@ -5,36 +6,52 @@ export type ProductRow = Product;
 export interface ProductFilter {
   q?: string;
   category?: string;
-  range?: string; // optional sheet/range, e.g. "Products!A1:ZZ"
+  /** Accepts: "Products!A1:ZZ", "Products", or just "A:Z" */
+  range?: string;
 }
 
 let __productsCache: Product[] | null = null;
 
-function rowToProduct(row: Record<string, any>): Product {
-  const name = row["Name"];
-  const imageURL = row["ImageURL (direct image link)"];
-  const description = row["Description"];
-  const pdfURL = row["PdfURL (direct PDF link)"];
-  const specs = row["SpecsBullets (optional text list)"];
+/* ---------- helpers ---------- */
+const norm = (s: unknown) =>
+  String(s ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "") // remove spaces
+    .replace(/[()]/g, ""); // drop parens
 
-  const features = specs
-    ? String(specs)
-        .split(/\r?\n|;|,/)
-        .map(s => s.trim())
-        .filter(Boolean)
-    : undefined;
+// Canonical header keys (normalized)
+const H = {
+  NAME: ["name", "product", "title"],
+  IMAGE: ["imageurl", "image", "thumbnail"],
+  DESC: ["description", "desc"],
+  PDF: ["pdfurl", "pdf", "specpdfurl", "specifications"],
+};
+
+function pickByHeader(row: Record<string, any>, candidates: string[]) {
+  for (const [k, v] of Object.entries(row)) {
+    if (candidates.includes(norm(k))) return v;
+  }
+  return undefined;
+}
+
+function toProduct(row: Record<string, any>): Product {
+  const name = pickByHeader(row, H.NAME);
+  const image = pickByHeader(row, H.IMAGE);
+  const description = pickByHeader(row, H.DESC);
+  const pdf = pickByHeader(row, H.PDF);
 
   return {
     name: name ? String(name) : undefined,
     description: description ? String(description) : undefined,
-    image: imageURL ? String(imageURL) : undefined,
-    imageUrl: imageURL ? String(imageURL) : undefined,
-    pdfUrl: pdfURL ? String(pdfURL) : undefined,
-    specPdfUrl: pdfURL ? String(pdfURL) : undefined,
-    features
+    image: image ? String(image) : undefined,
+    imageUrl: image ? String(image) : undefined,
+    pdfUrl: pdf ? String(pdf) : undefined,
+    specPdfUrl: pdf ? String(pdf) : undefined,
   };
 }
 
+/* ---------- workbook loader with header detection ---------- */
 async function loadAllProducts(range?: string): Promise<Product[]> {
   if (__productsCache && !range) return __productsCache;
 
@@ -45,50 +62,79 @@ async function loadAllProducts(range?: string): Promise<Product[]> {
   const buf = await res.arrayBuffer();
   const wb = XLSX.read(buf, { type: "array" });
 
-  let sheetName: string;
+  // Resolve sheet + optional A1 range
+  let sheetName: string | undefined;
   let a1: string | undefined;
 
   if (range) {
     if (range.includes("!")) {
       const [sn, r] = range.split("!");
-      sheetName = sn || wb.SheetNames[0];
+      sheetName = sn || undefined;
       a1 = r || undefined;
+    } else if (/^[A-Z]+(?:\d+)?:[A-Z]+(?:\d+)?$/i.test(range)) {
+      a1 = range;
     } else {
       sheetName = range;
     }
-  } else {
-    sheetName = wb.SheetNames[0];
+  }
+  if (!sheetName) {
+    sheetName = wb.SheetNames.find((n) => n.toLowerCase() === "products") || wb.SheetNames[0];
   }
 
   const ws = wb.Sheets[sheetName];
   if (!ws) throw new Error(`Sheet "${sheetName}" not found`);
 
-  const rows = XLSX.utils.sheet_to_json(ws, a1 ? { range: a1 } : undefined) as Record<string, any>[];
-  const products = rows.map(rowToProduct);
+  // Read as matrix to auto-find header row (one that contains "name")
+  const matrix = XLSX.utils.sheet_to_json<any[]>(ws, {
+    header: 1,
+    defval: "",
+    blankrows: false,
+    ...(a1 ? { range: a1 } : {}),
+  }) as any[][];
+
+  if (!Array.isArray(matrix) || matrix.length === 0) return [];
+
+  let headerRowIdx = -1;
+  for (let i = 0; i < Math.min(matrix.length, 50); i++) {
+    const row = matrix[i] || [];
+    if (row.some((cell) => norm(cell) === "name")) {
+      headerRowIdx = i;
+      break;
+    }
+  }
+  if (headerRowIdx === -1) headerRowIdx = 0;
+
+  const headers = (matrix[headerRowIdx] || []).map((h) => String(h ?? ""));
+  const dataRows = matrix.slice(headerRowIdx + 1);
+
+  const objects: Record<string, any>[] = dataRows.map((arr) => {
+    const obj: Record<string, any> = {};
+    headers.forEach((h, i) => (obj[h] = arr[i]));
+    return obj;
+  });
+
+  const products = objects
+    .map(toProduct)
+    .filter((p) => p.name || p.description || p.imageUrl || p.pdfUrl);
 
   if (!range) __productsCache = products;
   return products;
 }
 
+/* ---------- public API ---------- */
 export async function fetchProducts(params: ProductFilter = {}): Promise<Product[]> {
   const { q, category, range } = params;
   let items = await loadAllProducts(range);
 
   if (category && category.trim()) {
     const needle = category.trim().toLowerCase();
-    items = items.filter(p => (p.category ?? "").toLowerCase() === needle);
+    items = items.filter((p) => (p.category ?? "").toLowerCase() === needle);
   }
 
   if (q && q.trim()) {
     const needle = q.trim().toLowerCase();
-    items = items.filter(p => {
-      const hay = [
-        p.name,
-        p.description,
-        p.pdfUrl,
-        p.imageUrl,
-        ...(p.features ?? [])
-      ]
+    items = items.filter((p) => {
+      const hay = [p.name, p.description, p.pdfUrl, p.imageUrl]
         .filter(Boolean)
         .join(" ")
         .toLowerCase();
