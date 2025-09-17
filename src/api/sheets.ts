@@ -1,4 +1,3 @@
-// src/api/sheets.ts
 import type { Product } from "../types";
 
 export type ProductRow = Product;
@@ -9,10 +8,8 @@ export interface ProductFilter {
   range?: string; // optional sheet/range, e.g. "Products!A1:ZZ"
 }
 
-/** Cache parsed products per session */
 let __productsCache: Product[] | null = null;
 
-/** Convert row from Excel headers into Product */
 function rowToProduct(row: Record<string, any>): Product {
   const name = row["Name"];
   const imageURL = row["ImageURL (direct image link)"];
@@ -54,24 +51,19 @@ async function loadAllProducts(range?: string): Promise<Product[]> {
   if (range) {
     if (range.includes("!")) {
       const [sn, r] = range.split("!");
-      sheetName = sn || wb.SheetNames[0]; // fallback to first sheet
+      sheetName = sn || wb.SheetNames[0];
       a1 = r || undefined;
     } else {
       sheetName = range;
     }
   } else {
-    sheetName = wb.SheetNames[0]; // always defined
+    sheetName = wb.SheetNames[0];
   }
 
   const ws = wb.Sheets[sheetName];
   if (!ws) throw new Error(`Sheet "${sheetName}" not found`);
 
-  // Cast result instead of using type argument
-  const rows = XLSX.utils.sheet_to_json(ws, a1 ? { range: a1 } : undefined) as Record<
-    string,
-    any
-  >[];
-
+  const rows = XLSX.utils.sheet_to_json(ws, a1 ? { range: a1 } : undefined) as Record<string, any>[];
   const products = rows.map(rowToProduct);
 
   if (!range) __productsCache = products;
