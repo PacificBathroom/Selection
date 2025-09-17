@@ -58,7 +58,8 @@ function toProduct(row: Record<string, any>): Product {
     }
   }
 
-  return {
+  // Also mirror some legacy fields some components expect
+  const product: Product = {
     name: name ? String(name) : undefined,
     description: description ? String(description) : undefined,
     image: image ? String(image) : undefined,
@@ -68,13 +69,18 @@ function toProduct(row: Record<string, any>): Product {
     code: code ? String(code) : undefined,
     features,
   };
+
+  // Keep nested "product" for legacy code that reads p.product?.foo
+  product.product = product;
+
+  return product;
 }
 
 /* ---------- workbook loader with header detection ---------- */
 async function loadAllProducts(range?: string): Promise<Product[]> {
   if (__productsCache && !range) return __productsCache;
 
-  const XLSX = await import("xlsx");
+  const XLSX: any = await import("xlsx");
   const res = await fetch("/assets/precero.xlsx", { cache: "no-cache" });
   if (!res.ok) throw new Error(`Failed to fetch Excel: ${res.status}`);
 
@@ -98,7 +104,7 @@ async function loadAllProducts(range?: string): Promise<Product[]> {
   }
   if (!sheetName) {
     sheetName =
-      wb.SheetNames.find((n) => n.toLowerCase() === "products") ||
+      wb.SheetNames.find((n: string) => n.toLowerCase() === "products") ||
       wb.SheetNames[0];
   }
 
@@ -106,29 +112,29 @@ async function loadAllProducts(range?: string): Promise<Product[]> {
   if (!ws) throw new Error(`Sheet "${sheetName}" not found`);
 
   // Read as matrix to auto-find header row (one that contains "name")
-  const matrix = XLSX.utils.sheet_to_json<any[]>(ws, {
+  const matrix = XLSX.utils.sheet_to_json(ws, {
     header: 1,
     defval: "",
     blankrows: false,
     ...(a1 ? { range: a1 } : {}),
-  }) as any[][];
+  }) as unknown as any[][];
 
   if (!Array.isArray(matrix) || matrix.length === 0) return [];
 
   let headerRowIdx = -1;
   for (let i = 0; i < Math.min(matrix.length, 50); i++) {
     const row = matrix[i] || [];
-    if (row.some((cell) => norm(cell) === "name")) {
+    if (row.some((cell: any) => norm(cell) === "name")) {
       headerRowIdx = i;
       break;
     }
   }
   if (headerRowIdx === -1) headerRowIdx = 0;
 
-  const headers = (matrix[headerRowIdx] || []).map((h) => String(h ?? ""));
+  const headers = (matrix[headerRowIdx] || []).map((h: any) => String(h ?? ""));
   const dataRows = matrix.slice(headerRowIdx + 1);
 
-  const objects: Record<string, any>[] = dataRows.map((arr) => {
+  const objects: Record<string, any>[] = dataRows.map((arr: any[]) => {
     const obj: Record<string, any> = {};
     headers.forEach((h, i) => (obj[h] = arr[i]));
     return obj;
@@ -159,7 +165,17 @@ export async function fetchProducts(
   if (q && q.trim()) {
     const needle = q.trim().toLowerCase();
     items = items.filter((p) => {
-      const hay = [p.name, p.description, p.pdfUrl, p.imageUrl, p.code]
+      const hay = [
+        p.name,
+        p.description,
+        p.pdfUrl,
+        p.imageUrl,
+        p.code,
+        p.brand,
+        p.specifications,
+        ...(p.specs ?? []),
+        ...(p.features ?? []),
+      ]
         .filter(Boolean)
         .join(" ")
         .toLowerCase();
