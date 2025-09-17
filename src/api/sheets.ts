@@ -36,7 +36,7 @@ const H = {
   DESC: ["description", "desc"].map(norm),
   PDF: ["pdfurl", "pdf", "specpdfurl", "specifications"].map(norm),
   CODE: ["code", "product_code", "sku"].map(norm),
-  SPECS: ["specsbullets", "specs", "features"].map(norm), // optional future column
+  SPECS: ["specsbullets", "specs", "features"].map(norm), // optional
 };
 
 function toProduct(row: Record<string, any>): Product {
@@ -58,7 +58,6 @@ function toProduct(row: Record<string, any>): Product {
     }
   }
 
-  // Also mirror some legacy fields some components expect
   const product: Product = {
     name: name ? String(name) : undefined,
     description: description ? String(description) : undefined,
@@ -77,94 +76,128 @@ function toProduct(row: Record<string, any>): Product {
 }
 
 /* ---------- workbook loader with header detection ---------- */
-async function loadAllProducts(range?: string): Promise<Product[]> {
-  if (__productsCache && !range) return __productsCache;
-
-  const XLSX: any = await import("xlsx");
-  const res = await fetch("/assets/precero.xlsx", { cache: "no-cache" });
-  if (!res.ok) throw new Error(`Failed to fetch Excel: ${res.status}`);
-
-  const buf = await res.arrayBuffer();
-  const wb = XLSX.read(buf, { type: "array" });
-
-  // Resolve sheet + optional A1 range
-  let sheetName: string | undefined;
-  let a1: string | undefined;
-
-  if (range) {
-    if (range.includes("!")) {
-      const [sn, r] = range.split("!");
-      sheetName = sn || undefined;
-      a1 = r || undefined;
-    } else if (/^[A-Z]+(?:\d+)?:[A-Z]+(?:\d+)?$/i.test(range)) {
-      a1 = range;
-    } else {
-      sheetName = range;
-    }
-  }
-  if (!sheetName) {
-    sheetName =
-      wb.SheetNames.find((n: string) => n.toLowerCase() === "products") ||
-      wb.SheetNames[0];
-  }
-
-  const ws = wb.Sheets[sheetName];
-  if (!ws) throw new Error(`Sheet "${sheetName}" not found`);
-
-  // Read as matrix to auto-find header row (one that contains "name")
-  const matrix = XLSX.utils.sheet_to_json(ws, {
-    header: 1,
-    defval: "",
-    blankrows: false,
-    ...(a1 ? { range: a1 } : {}),
-  }) as unknown as any[][];
-
-  if (!Array.isArray(matrix) || matrix.length === 0) return [];
-
-  let headerRowIdx = -1;
-  for (let i = 0; i < Math.min(matrix.length, 50); i++) {
-    const row = matrix[i] || [];
-    if (row.some((cell: any) => norm(cell) === "name")) {
-      headerRowIdx = i;
-      break;
-    }
-  }
-  if (headerRowIdx === -1) headerRowIdx = 0;
-
-  const headers = (matrix[headerRowIdx] || []).map((h: any) => String(h ?? ""));
-  const dataRows = matrix.slice(headerRowIdx + 1);
-
-  const objects: Record<string, any>[] = dataRows.map((arr: any[]) => {
-    const obj: Record<string, any> = {};
-    headers.forEach((h, i) => (obj[h] = arr[i]));
-    return obj;
-  });
-
-  const products = objects
-    .map(toProduct)
-    .filter((p) => p.name || p.description || p.imageUrl || p.pdfUrl);
-
-  if (!range) __productsCache = products;
-  return products;
-}
-
-/* ---------- public API ---------- */
 export async function fetchProducts(
   params: ProductFilter = {}
 ): Promise<Product[]> {
   const { q, category, range } = params;
-  let items = await loadAllProducts(range);
+
+  if (!__productsCache || range) {
+    const XLSX: any = await import("xlsx");
+    const res = await fetch("/assets/precero.xlsx", { cache: "no-cache" });
+    if (!res.ok) throw new Error(`Failed to fetch Excel: ${res.status}`);
+
+    const buf = await res.arrayBuffer();
+    const wb = XLSX.read(buf, { type: "array" });
+
+    // Resolve sheet + optional A1 range
+    let sheetName: string | undefined;
+    let a1: string | undefined;
+
+    if (range) {
+      if (range.includes("!")) {
+        const [sn, r] = range.split("!");
+        sheetName = sn || undefined;
+        a1 = r || undefined;
+      } else if (/^[A-Z]+(?:\d+)?:[A-Z]+(?:\d+)?$/i.test(range)) {
+        a1 = range;
+      } else {
+        sheetName = range;
+      }
+    }
+    if (!sheetName) {
+      sheetName =
+        wb.SheetNames.find((n: string) => n.toLowerCase() === "products") ||
+        wb.SheetNames[0];
+    }
+
+    const ws = wb.Sheets[sheetName];
+    if (!ws) throw new Error(`Sheet "${sheetName}" not found`);
+
+    // Read as matrix to auto-find header row (one that contains "name")
+    const matrix = XLSX.utils.sheet_to_json(ws, {
+      header: 1,
+      defval: "",
+      blankrows: false,
+      ...(a1 ? { range: a1 } : {}),
+    }) as unknown as any[][];
+
+    if (!Array.isArray(matrix) || matrix.length === 0) return [];
+
+    let headerRowIdx = -1;
+    for (let i = 0; i < Math.min(matrix.length, 50); i++) {
+      const row = matrix[i] || [];
+      if (row.some((cell: any) => norm(cell) === "name")) {
+        headerRowIdx = i;
+        break;
+      }
+    }
+    if (headerRowIdx === -1) headerRowIdx = 0;
+
+    const rawHeaders = (matrix[headerRowIdx] || []).map((h: any) =>
+      String(h ?? "").trim()
+    );
+    const dataRows = matrix.slice(headerRowIdx + 1);
+
+    // Build objects while skipping empty headers and generating safe keys
+    const objects: Record<string, any>[] = dataRows.map((arr: any[]) => {
+      const obj: Record<string, any> = {};
+      rawHeaders.forEach((h, i) => {
+        const key = h ? h : `col_${i}`;
+        if (key) obj[key] = arr[i];
+      });
+      return obj;
+    });
+
+    const products = objects
+      .map(toProduct)
+      .filter((p) => p.name || p.description || p.imageUrl || p.pdfUrl);
+
+    if (!range) __productsCache = products;
+    else __productsCache = null; // keep cache clean if a custom range was used
+
+    // continue with filtering below using local `products`
+    let items = products;
+
+    if (category && category.trim()) {
+      const needle = category.trim().toLowerCase();
+      items = items.filter((p) => (p.category ?? "").toLowerCase() === needle);
+    }
+
+    if (q && q.trim()) {
+      const needle = q.trim().toLowerCase();
+      items = items.filter((p) => {
+        const hay = [
+          p.name,
+          p.description,
+          p.pdfUrl,
+          p.imageUrl,
+          p.code,
+          p.brand,
+          p.specifications,
+          ...(Array.isArray(p.specs) ? p.specs.map((s) => (typeof s === "string" ? s : `${s.label} ${s.value}`)) : []),
+          ...(p.features ?? []),
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        return hay.includes(needle);
+      });
+    }
+
+    return items;
+  }
+
+  // Use cached products when available and no custom range
+  let items = __productsCache;
 
   if (category && category.trim()) {
     const needle = category.trim().toLowerCase();
-    items = items.filter(
-      (p) => (p.category ?? "").toLowerCase() === needle
-    );
+    items = items!.filter((p) => (p.category ?? "").toLowerCase() === needle);
   }
 
   if (q && q.trim()) {
     const needle = q.trim().toLowerCase();
-    items = items.filter((p) => {
+    items = items!.filter((p) => {
       const hay = [
         p.name,
         p.description,
@@ -173,7 +206,7 @@ export async function fetchProducts(
         p.code,
         p.brand,
         p.specifications,
-        ...(p.specs ?? []),
+        ...(Array.isArray(p.specs) ? p.specs.map((s) => (typeof s === "string" ? s : `${s.label} ${s.value}`)) : []),
         ...(p.features ?? []),
       ]
         .filter(Boolean)
@@ -183,5 +216,5 @@ export async function fetchProducts(
     });
   }
 
-  return items;
+  return items!;
 }
