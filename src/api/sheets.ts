@@ -48,24 +48,27 @@ async function loadAllProducts(range?: string): Promise<Product[]> {
   const buf = await res.arrayBuffer();
   const wb = XLSX.read(buf, { type: "array" });
 
-  let sheetName: string | undefined;
+  let sheetName: string;
   let a1: string | undefined;
+
   if (range) {
     if (range.includes("!")) {
       const [sn, r] = range.split("!");
-      sheetName = sn || undefined;
+      sheetName = sn || wb.SheetNames[0]; // fallback to first sheet
       a1 = r || undefined;
     } else {
       sheetName = range;
     }
+  } else {
+    sheetName = wb.SheetNames[0]; // always defined now
   }
-  if (!sheetName) sheetName = wb.SheetNames[0];
 
   const ws = wb.Sheets[sheetName];
   if (!ws) throw new Error(`Sheet "${sheetName}" not found`);
 
-  const rows = XLSX.utils.sheet_to_json<Record<string, any>>(ws, a1 ? { range: a1 } : undefined);
-  const products = rows.map(rowToProduct);
+  // 👇 remove the type argument to satisfy TS
+  const rows = XLSX.utils.sheet_to_json(ws, a1 ? { range: a1 } : undefined) as Record<string, any>[];
+
 
   if (!range) __productsCache = products;
   return products;
