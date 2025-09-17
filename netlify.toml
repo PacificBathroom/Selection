@@ -2,15 +2,7 @@
   command = "npm install --no-audit --no-fund --loglevel verbose && npm run build"
   publish = "dist"
 
-[functions]
-  directory = "netlify/functions"
-  node_bundler = "esbuild"
-
-[[redirects]]
-  from = "/api/*"
-  to   = "/.netlify/functions/:splat"
-  status = 200
-
+# Keep SPA fallback so React Router works
 [[redirects]]
   from = "/*"
   to   = "/index.html"
