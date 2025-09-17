@@ -1,7 +1,6 @@
 // src/components/ProductGallery.tsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import type { ClientInfo, Product } from "../types";
-import { fetchProducts } from "../api/sheets";
 import { exportDeckFromProducts } from "../utils/pptExporter";
 
 // --- small helper: quick hash so we never collide ---
@@ -15,7 +14,6 @@ function hash(str: string) {
 }
 
 // A stable unique key for each product row.
-// Order of preference: id/_id/_row/code/SKU/url → name+index → hashed fallback
 function productKeyOf(p: any, i: number): string {
   const candidates = [
     p.id, p._id, p._row, p.row,
@@ -27,59 +25,68 @@ function productKeyOf(p: any, i: number): string {
   const name = String(p.product ?? p.name ?? "").trim();
   if (name) return `${name}#${i}`;
 
-  // final fallback: stable-ish hash of serialized row + index
   return `row#${hash(JSON.stringify(p))}#${i}`;
 }
 
 type Props = {
   client: ClientInfo;
-  range?: string; // e.g. "Products!A1:ZZ"
+  products: Product[];
 };
 
-export default function ProductGallery({ client, range }: Props) {
-  const [items, setItems] = useState<Product[]>([]);
+export default function ProductGallery({ client, products }: Props) {
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
 
-  // Use a map of key -> product for multi-select
+  // Selection state
   const [selected, setSelected] = useState<Record<string, Product>>({});
   const selectedList = useMemo(() => Object.values(selected), [selected]);
 
-  useEffect(() => {
-    runSearch();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  async function runSearch() {
-    try {
-      setLoading(true);
-      setErrorMsg(null);
-      const res = await fetchProducts({ q: search, category, range });
-      setItems(res);
-    } catch (e: any) {
-      console.error(e);
-      setItems([]);
-      setErrorMsg(e?.message || String(e));
-    } finally {
-      setLoading(false);
-    }
-  }
-
+  // Filter + sort pipeline
   const categories = useMemo(() => {
     const s = new Set(
-      items
+      products
         .map((i: any) => String(i.category || i.Category || "").trim())
         .filter(Boolean)
     );
     return Array.from(s).sort((a, b) => a.localeCompare(b));
-  }, [items]);
+  }, [products]);
 
   const [sortBy, setSortBy] = useState<"sheet" | "name" | "category">("sheet");
+
   const visibleItems = useMemo(() => {
-    const arr = [...items];
+    let arr = [...products];
+
+    // search filter
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      arr = arr.filter((p) => {
+        const hay = [
+          p.name,
+          p.product,
+          p.code,
+          p.sku,
+          p.description,
+          p.category,
+        ]
+          .filter(Boolean)
+          .map(String)
+          .join(" ")
+          .toLowerCase();
+        return hay.includes(q);
+      });
+    }
+
+    // category filter
+    if (category.trim()) {
+      arr = arr.filter(
+        (p) =>
+          String(p.category || "").trim().toLowerCase() ===
+          category.trim().toLowerCase()
+      );
+    }
+
+    // sorting
     if (sortBy === "name") {
       arr.sort((a: any, b: any) =>
         String(a.product || a.name || "").localeCompare(
@@ -92,10 +99,9 @@ export default function ProductGallery({ client, range }: Props) {
       );
     }
     return arr;
-  }, [items, sortBy]);
+  }, [products, search, category, sortBy]);
 
   function toggle(p: Product, index: number, e?: React.ChangeEvent<HTMLInputElement>) {
-    // Prevent any bubbling that might trigger parent handlers
     if (e) e.stopPropagation();
     const key = productKeyOf(p as any, index);
     setSelected((prev) => {
@@ -107,7 +113,6 @@ export default function ProductGallery({ client, range }: Props) {
   }
 
   function onCardClick(p: Product, index: number) {
-    // Only toggle when clicking the card background, not links/controls
     toggle(p, index);
   }
 
@@ -145,7 +150,9 @@ export default function ProductGallery({ client, range }: Props) {
         >
           <option value="">All categories</option>
           {categories.map((c) => (
-            <option key={c} value={c}>{c}</option>
+            <option key={c} value={c}>
+              {c}
+            </option>
           ))}
         </select>
 
@@ -160,15 +167,6 @@ export default function ProductGallery({ client, range }: Props) {
           <option value="name">Name A–Z</option>
           <option value="category">Category A–Z</option>
         </select>
-
-        <button
-          type="button"
-          onClick={runSearch}
-          disabled={loading}
-          className="px-3 py-2 text-sm rounded-lg border hover:bg-slate-50 disabled:opacity-50"
-        >
-          {loading ? "Searching…" : "Search"}
-        </button>
 
         <div className="ml-auto flex items-center gap-3">
           <span className="text-sm text-slate-600">
@@ -186,11 +184,7 @@ export default function ProductGallery({ client, range }: Props) {
       </div>
 
       {/* Grid */}
-      {errorMsg ? (
-        <div className="text-sm text-red-600">Error: {errorMsg}</div>
-      ) : loading ? (
-        <div className="text-sm text-slate-500">Loading…</div>
-      ) : visibleItems.length === 0 ? (
+      {visibleItems.length === 0 ? (
         <p className="text-sm text-slate-500">No products found.</p>
       ) : (
         <ul className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
@@ -199,17 +193,20 @@ export default function ProductGallery({ client, range }: Props) {
             const checked = Boolean(selected[key]);
             const title = String((p as any).product || (p as any).name || "Untitled");
             const thumb =
-              (p as any).thumbnail || (p as any).imageurl || (p as any).image || "";
+              (p as any).thumbnail || (p as any).imageUrl || (p as any).image || "";
 
-            // Unique checkbox id so labels don’t cross-wire
             const cbId = `select-${hash(key)}-${i}`;
 
             return (
               <li
                 key={key}
                 onClick={(e) => {
-                  // only toggle when clicking card background
-                  if ((e.target as HTMLElement).closest("input,button,a,select,textarea")) return;
+                  if (
+                    (e.target as HTMLElement).closest(
+                      "input,button,a,select,textarea"
+                    )
+                  )
+                    return;
                   onCardClick(p, i);
                 }}
                 className={`border rounded-2xl p-3 flex gap-3 transition ring-offset-2 ${
@@ -244,7 +241,9 @@ export default function ProductGallery({ client, range }: Props) {
                   </label>
                   <div className="text-xs text-slate-500 space-x-2">
                     {(p as any).sku && <span>SKU: {String((p as any).sku)}</span>}
-                    {(p as any).category && <span>Category: {String((p as any).category)}</span>}
+                    {(p as any).category && (
+                      <span>Category: {String((p as any).category)}</span>
+                    )}
                   </div>
                   {(p as any).description ? (
                     <p className="mt-1 text-sm text-slate-700 line-clamp-2">
