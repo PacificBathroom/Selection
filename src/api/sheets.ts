@@ -135,13 +135,14 @@ export async function fetchProducts(params: ProductFilter = {}): Promise<Product
 
     // Build objects while skipping empty headers and generating safe keys
     const objects: Record<string, any>[] = dataRows.map((arr: any[]) => {
-      const obj: Record<string, any> = {};
-      rawHeaders.forEach((h, i) => {
-        const key: string = h && h.length ? h : `col_${i}`;
-        (obj as any)[key] = arr[i];
-      });
-      return obj;
-    });
+  const obj: Record<string, any> = {};
+  rawHeaders.forEach((h, i) => {
+    const safeKey = String(h && String(h).trim() ? h : `col_${i}`);
+    obj[safeKey] = arr[i];
+  });
+  return obj;
+});
+
 
     const products = objects
       .map(toProduct)
