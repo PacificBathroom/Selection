@@ -99,28 +99,30 @@ async function loadAllProducts(range?: string): Promise<Product[]> {
   const buf = await res.arrayBuffer();
   const wb = XLSX.read(buf, { type: "array" });
 
-  // Resolve sheet + optional A1 range
-  let sheetName: string | undefined;
-  let a1: string | undefined;
+// Resolve sheet + optional A1 range
+let sheetName!: string;             // <-- guaranteed string (we'll assign before use)
+let a1: string | undefined;
 
-  if (range) {
-    if (range.includes("!")) {
-      const [sn, r] = range.split("!");
-      sheetName = sn || undefined;
-      a1 = r || undefined;
-    } else if (/^[A-Z]+(?:\d+)?:[A-Z]+(?:\d+)?$/i.test(range)) {
-      a1 = range;
-    } else {
-      sheetName = range;
-    }
+if (range) {
+  if (range.includes("!")) {
+    const [sn, r] = range.split("!");
+    if (sn && sn.trim()) sheetName = sn.trim();
+    if (r && r.trim()) a1 = r.trim();
+  } else if (/^[A-Z]+(?:\d+)?:[A-Z]+(?:\d+)?$/i.test(range)) {
+    a1 = range;
+  } else {
+    sheetName = range.trim();
   }
-  if (!sheetName) {
-    sheetName =
-      wb.SheetNames.find((n: string) => n.toLowerCase() === "products") || wb.SheetNames[0];
-  }
+}
+if (!sheetName) {
+  const names = (wb.SheetNames || []) as string[];
+  sheetName = names.find((n) => n.toLowerCase() === "products") || names[0] || "";
+}
+if (!sheetName) throw new Error("Workbook has no sheets");
 
-  const ws = wb.Sheets[sheetName];
-  if (!ws) throw new Error(`Sheet "${sheetName}" not found`);
+const ws = wb.Sheets[sheetName];    // sheetName is definitely a string now
+if (!ws) throw new Error(`Sheet "${sheetName}" not found`);
+
 
   // Read as matrix (header:1) so we can detect header row containing "Name"
   const matrix = XLSX.utils.sheet_to_json(ws, {
