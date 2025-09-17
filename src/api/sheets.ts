@@ -20,21 +20,43 @@ const norm = (s: unknown) =>
     .replace(/\s+/g, "") // remove spaces
     .replace(/[()]/g, ""); // drop parens
 
+function pickByHeader(row: Record<string, any>, candidates: string[]): any {
+  for (const key of Object.keys(row)) {
+    if (candidates.includes(norm(key))) {
+      return row[key];
+    }
+  }
+  return undefined;
+}
+
 // Canonical header keys (normalized)
 const H = {
-  NAME: ["name", "product", "title"],
-  IMAGE: ["imageurl", "image", "thumbnail"],
-  DESC: ["description", "desc"],
-  PDF:  ["pdfurl", "pdf", "specpdfurl", "specifications"],
-  CODE: ["code", "product_code", "sku"]
+  NAME: ["name", "product", "title"].map(norm),
+  IMAGE: ["imageurl", "image", "thumbnail"].map(norm),
+  DESC: ["description", "desc"].map(norm),
+  PDF: ["pdfurl", "pdf", "specpdfurl", "specifications"].map(norm),
+  CODE: ["code", "product_code", "sku"].map(norm),
+  SPECS: ["specsbullets", "specs", "features"].map(norm), // optional future column
 };
-
 
 function toProduct(row: Record<string, any>): Product {
   const name = pickByHeader(row, H.NAME);
   const image = pickByHeader(row, H.IMAGE);
   const description = pickByHeader(row, H.DESC);
   const pdf = pickByHeader(row, H.PDF);
+  const code = pickByHeader(row, H.CODE);
+  const specs = pickByHeader(row, H.SPECS);
+
+  let features: string[] | undefined;
+  if (specs) {
+    const s = String(specs).trim();
+    if (s) {
+      features = s
+        .split(/\r?\n|;|,/)
+        .map((t) => t.trim())
+        .filter(Boolean);
+    }
+  }
 
   return {
     name: name ? String(name) : undefined,
@@ -43,6 +65,8 @@ function toProduct(row: Record<string, any>): Product {
     imageUrl: image ? String(image) : undefined,
     pdfUrl: pdf ? String(pdf) : undefined,
     specPdfUrl: pdf ? String(pdf) : undefined,
+    code: code ? String(code) : undefined,
+    features,
   };
 }
 
@@ -73,7 +97,9 @@ async function loadAllProducts(range?: string): Promise<Product[]> {
     }
   }
   if (!sheetName) {
-    sheetName = wb.SheetNames.find((n) => n.toLowerCase() === "products") || wb.SheetNames[0];
+    sheetName =
+      wb.SheetNames.find((n) => n.toLowerCase() === "products") ||
+      wb.SheetNames[0];
   }
 
   const ws = wb.Sheets[sheetName];
@@ -117,19 +143,23 @@ async function loadAllProducts(range?: string): Promise<Product[]> {
 }
 
 /* ---------- public API ---------- */
-export async function fetchProducts(params: ProductFilter = {}): Promise<Product[]> {
+export async function fetchProducts(
+  params: ProductFilter = {}
+): Promise<Product[]> {
   const { q, category, range } = params;
   let items = await loadAllProducts(range);
 
   if (category && category.trim()) {
     const needle = category.trim().toLowerCase();
-    items = items.filter((p) => (p.category ?? "").toLowerCase() === needle);
+    items = items.filter(
+      (p) => (p.category ?? "").toLowerCase() === needle
+    );
   }
 
   if (q && q.trim()) {
     const needle = q.trim().toLowerCase();
     items = items.filter((p) => {
-      const hay = [p.name, p.description, p.pdfUrl, p.imageUrl]
+      const hay = [p.name, p.description, p.pdfUrl, p.imageUrl, p.code]
         .filter(Boolean)
         .join(" ")
         .toLowerCase();
