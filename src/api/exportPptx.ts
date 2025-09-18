@@ -1,123 +1,172 @@
 // src/api/exportPptx.ts
-import PptxGenJS from "pptxgenjs";
-import type { Product, ClientInfo } from "../types";
+import PptxGenJS, { TextPropsOptions } from "pptxgenjs";
+import type { Product } from "../types";
 
-/**
- * Export selected products to a PPTX using your layout:
- * - Left: image (from imageUrl)
- * - Right: Name, Description (wrapped), Product code
- * - Specs button: hyperlinks to pdfUrl
- * - Includes cover + back page with contact details
- */
-export async function exportSelectionToPptx(opts: {
-  client: ClientInfo;
-  products: Product[];
-  fileName?: string;
-}) {
-  const { client, products, fileName = "Product-Presentation.pptx" } = opts;
+/** tiny helper to keep text props tidy */
+const H1: TextPropsOptions = {
+  fontFace: "Montserrat",
+  fontSize: 24,
+  bold: true,
+  color: "363636",
+};
+const H2: TextPropsOptions = {
+  fontFace: "Montserrat",
+  fontSize: 14,
+  bold: true,
+  color: "555555",
+};
+const BODY: TextPropsOptions = {
+  fontFace: "Inter",
+  fontSize: 12,
+  color: "333333",
+};
+
+function autosizeText(text: string, maxChars = 600): string {
+  const s = String(text || "");
+  return s.length > maxChars ? s.slice(0, maxChars - 1) + "…" : s;
+}
+
+/** Make a single product slide matching your placeholder layout */
+function addProductSlide(pptx: PptxGenJS, p: Product, contactName?: string) {
+  const slide = pptx.addSlide();
+
+  // background
+  slide.addShape(pptx.ShapeType.rect, {
+    x: 0,
+    y: 0,
+    w: "100%",
+    h: "100%",
+    fill: { color: "FFFFFF" },
+    line: { style: "none" },
+  });
+
+  // left: image (from imageUrl)
+  if (p.imageUrl) {
+    slide.addImage({
+      path: p.imageUrl,
+      x: 0.3,
+      y: 0.6,
+      w: 5.0,
+      h: 3.6,
+      sizing: { type: "contain", w: 5.0, h: 3.6 },
+    });
+  } else {
+    slide.addText("No image", {
+      x: 0.3,
+      y: 0.6,
+      w: 5.0,
+      h: 3.6,
+      align: "center",
+      valign: "middle",
+      ...BODY,
+    });
+  }
+
+  // right: name
+  slide.addText(p.name || "Untitled product", {
+    x: 5.6,
+    y: 0.6,
+    w: 4.8,
+    h: 0.6,
+    ...H1,
+  });
+
+  // right: product code
+  if (p.code) {
+    slide.addText(`Product code: ${p.code}`, {
+      x: 5.6,
+      y: 1.3,
+      w: 4.8,
+      h: 0.35,
+      ...H2,
+    });
+  }
+
+  // right: description (autosize-ish via truncation)
+  if (p.description) {
+    slide.addText(autosizeText(p.description, 1000), {
+      x: 5.6,
+      y: 1.8,
+      w: 4.8,
+      h: 2.1,
+      valign: "top",
+      ...BODY,
+    });
+  }
+
+  // right: specs box uses PDF preview image — if you only have a link,
+  // we put a clickable “Specs” thumbnail.
+  if (p.pdfUrl) {
+    slide.addShape(pptx.ShapeType.rect, {
+      x: 5.6,
+      y: 4.1,
+      w: 2.4,
+      h: 1.6,
+      fill: { color: "F2F3F5" },
+      line: { style: "none" },
+    });
+    slide.addText("Specs (PDF)", {
+      x: 5.6,
+      y: 4.1,
+      w: 2.4,
+      h: 1.6,
+      align: "center",
+      valign: "middle",
+      hyperlink: { url: p.pdfUrl },
+      ...H2,
+    });
+  }
+
+  // Contact name box (bottom-right)
+  if (contactName) {
+    slide.addText(`Contact: ${contactName}`, {
+      x: 8.2,
+      y: 4.2,
+      w: 2.2,
+      h: 0.5,
+      align: "right",
+      ...BODY,
+    });
+  }
+}
+
+export async function exportSelectionToPptx(
+  opts: {
+    products: Product[];
+    coverTitle?: string;
+    contactName?: string;
+  }
+): Promise<void> {
+  const { products, coverTitle = "Product Selection", contactName } = opts;
 
   const pptx = new PptxGenJS();
 
-  // --- Cover ---
-  {
-    const slide = pptx.addSlide();
-    slide.addText(client.projectName || "Project Selection", {
-      x: 0.5, y: 1.0, w: 9, h: 1,
-      fontSize: 36, bold: true, color: "1F2937",
-    });
+  // cover
+  const cover = pptx.addSlide();
+  cover.addText(coverTitle, {
+    x: 0.8,
+    y: 2.5,
+    w: 8.5,
+    h: 1,
+    align: "left",
+    ...H1,
+    fontSize: 36,
+  });
 
-    const subtitle = [
-      client.clientName ? `Client: ${client.clientName}` : "",
-      client.dateISO ? `Date: ${client.dateISO}` : "",
-    ].filter(Boolean).join("   •   ");
+  // each product slide
+  for (const p of products) addProductSlide(pptx, p, contactName);
 
-    if (subtitle) {
-      slide.addText(subtitle, {
-        x: 0.5, y: 1.8, w: 9, h: 0.6,
-        fontSize: 18, color: "374151",
-      });
-    }
-  }
+  // back page
+  const back = pptx.addSlide();
+  back.addText("Thank you", {
+    x: 0.8,
+    y: 3.0,
+    w: 8.5,
+    h: 1,
+    ...H1,
+    fontSize: 32,
+  });
 
-  // --- Product slides ---
-  for (const p of products) {
-    const slide = pptx.addSlide();
-
-    // Left: image or placeholder
-    const img = p.imageUrl || p.image;
-    if (img) {
-      slide.addImage({ path: img, x: 0.5, y: 1.1, w: 4.8, h: 3.6 });
-    } else {
-      slide.addShape(pptx.ShapeType.rect, {
-        x: 0.5, y: 1.1, w: 4.8, h: 3.6,
-        fill: { color: "F3F4F6" },
-        line: { color: "D1D5DB", width: 1 },
-      });
-    }
-
-    // Right: name
-    slide.addText(p.name || p.product || "Untitled", {
-      x: 5.5, y: 1.1, w: 4.0, h: 0.8,
-      fontSize: 24, bold: true, color: "111827",
-    });
-
-    // Right: description (auto-wrap in box)
-    const desc = p.description || p.specifications || "";
-    if (desc) {
-      slide.addText(desc, {
-        x: 5.5, y: 2.0, w: 4.0, h: 2.0,
-        fontSize: 14, color: "374151", valign: "top",
-      });
-    }
-
-    // Right: product code
-    const code = p.code ?? p.sku;
-    if (code) {
-      slide.addText(`Product code: ${code}`, {
-        x: 5.5, y: 4.1, w: 4.0, h: 0.5,
-        fontSize: 12, color: "6B7280",
-      });
-    }
-
-    // Specs button (hyperlink to pdfUrl/specPdfUrl)
-    const pdf = p.pdfUrl ?? p.specPdfUrl;
-    if (pdf) {
-      slide.addShape(pptx.ShapeType.roundRect, {
-        x: 5.5, y: 4.6, w: 1.8, h: 0.6,
-        fill: { color: "2563EB" }, line: { color: "1D4ED8", width: 1 },
-      });
-      slide.addText([{ text: "Specs", options: { color: "FFFFFF", fontSize: 14, bold: true } }], {
-        x: 5.5, y: 4.6, w: 1.8, h: 0.6,
-        align: "center",
-        hyperlink: { url: pdf },
-      });
-    }
-  }
-
-  // --- Back page ---
-  {
-    const slide = pptx.addSlide();
-    slide.addText("Thank you", {
-      x: 0.5, y: 1.0, w: 9, h: 1,
-      fontSize: 32, bold: true, color: "111827", align: "left",
-    });
-
-    const contactLines = [
-      client.contactName ? `Contact: ${client.contactName}` : "",
-      client.contactEmail ? `Email: ${client.contactEmail}` : "",
-      client.contactPhone ? `Phone: ${client.contactPhone}` : "",
-    ].filter(Boolean).join("\n");
-
-    if (contactLines) {
-      slide.addText(contactLines, {
-        x: 0.5, y: 1.8, w: 5.0, h: 1.5,
-        fontSize: 16, color: "374151",
-      });
-    }
-  }
-
-  await pptx.writeFile({ fileName });
+  // IMPORTANT: new signature expects options object
+  await pptx.writeFile({ fileName: "Product-Presentation.pptx" });
 }
-
-// Keep legacy import working: `import { exportPptx } from "@/api/exportPptx"`
-export const exportPptx = exportSelectionToPptx;
