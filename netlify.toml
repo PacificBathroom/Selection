@@ -5,16 +5,4 @@
 
 [functions]
   node_bundler = "esbuild"
-  # important: do NOT list googleapis here
-  # external_node_modules = []
-
-
-[[redirects]]
-  from = "/api/*"
-  to = "/.netlify/functions/:splat"
-  status = 200
-
-[[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200
+  # Do NOT set external_node_modules here for googleapis
