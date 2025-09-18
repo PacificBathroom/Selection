@@ -1,35 +1,33 @@
 import React, { useEffect, useMemo, useState } from "react";
-import type { Section } from "@/types";
-import type { Product } from "@/types";
-import { fetchProducts, type ProductRow } from "@/api/sheets"; // ProductRow === Product
+import type { Section } from "../types";
+import { fetchProducts, type ProductRow } from "../api/sheets";
 import ProductCard from "./ProductCard";
 
 type Props = {
   section: Section;
-  onSelectProduct?: (p: Product) => void;
+  onSelectProduct?: (p: ProductRow) => void;
+  onUpdate?: (next: Section) => void;
 };
 
 export default function SectionSlide({ section, onSelectProduct }: Props) {
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("");
   const [items, setItems] = useState<ProductRow[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
-    (async () => {
-      try {
-        setLoading(true);
-        setErr(null);
-        const rows = await fetchProducts({ q: search, category });
+    setLoading(true);
+    setErr(null);
+    fetchProducts({ q: search, category })
+      .then((rows) => {
         if (alive) setItems(rows);
-      } catch (e: any) {
+      })
+      .catch((e) => {
         if (alive) setErr(e?.message || "Failed to load products");
-      } finally {
-        if (alive) setLoading(false);
-      }
-    })();
+      })
+      .finally(() => alive && setLoading(false));
     return () => {
       alive = false;
     };
@@ -37,21 +35,21 @@ export default function SectionSlide({ section, onSelectProduct }: Props) {
 
   const categories = useMemo(() => {
     const s = new Set(
-      items.map((i) => i.category?.toString().trim() || "").filter(Boolean)
+      items.map((i) => (i.category || "").toString().trim()).filter(Boolean)
     );
     return Array.from(s).sort((a, b) => a.localeCompare(b));
   }, [items]);
 
   return (
     <section className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
-      <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
+      <div className="flex items-center justify-between mb-3 gap-3">
         <h3 className="text-lg font-semibold">{section.title}</h3>
 
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search products, code, description…"
+            placeholder="Search products, SKU, description…"
             className="border rounded-lg px-3 py-2 text-sm w-64"
           />
           <select
@@ -66,13 +64,6 @@ export default function SectionSlide({ section, onSelectProduct }: Props) {
               </option>
             ))}
           </select>
-          <button
-            type="button"
-            className="border rounded-lg px-3 py-2 text-sm"
-            onClick={() => setSearch((s) => s.trim())}
-          >
-            Search
-          </button>
         </div>
       </div>
 
@@ -85,11 +76,8 @@ export default function SectionSlide({ section, onSelectProduct }: Props) {
       ) : (
         <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {items.map((p, i) => (
-            <li key={`${p.code || p.name || i}`}>
-              <ProductCard
-                product={p as Product}
-                onSelect={onSelectProduct}
-              />
+            <li key={`${p.sku || p.code || p.product || p.name || i}`}>
+              <ProductCard product={p} onSelect={onSelectProduct} />
             </li>
           ))}
         </ul>
