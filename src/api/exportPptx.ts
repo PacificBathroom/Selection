@@ -51,36 +51,23 @@ function addProductSlide(pptx: PptxGenJS, p: Product, contactName?: string) {
       sizing: { type: "contain", w: 5.0, h: 3.6 },
     });
   } else {
-    slide.addText("No image", {
-      x: 0.3,
-      y: 0.6,
-      w: 5.0,
-      h: 3.6,
-      align: "center",
-      valign: "middle",
-      ...BODY,
-    });
-  }
+   slide.addText([{ text: product.name ?? "", options: { bold: true, fontSize: 18 } }], {
+  x: 0.5, y: 0.5, w: 8, h: 0.5
+});
+
 
   // right: name
-  slide.addText(p.name || "Untitled product", {
-    x: 5.6,
-    y: 0.6,
-    w: 4.8,
-    h: 0.6,
-    ...H1,
-  });
+slide.addText([{ text: product.name ?? "", options: { bold: true, fontSize: 18 } }], {
+  x: 0.5, y: 0.5, w: 8, h: 0.5
+});
+
 
   // right: product code
   if (p.code) {
-    slide.addText(`Product code: ${p.code}`, {
-      x: 5.6,
-      y: 1.3,
-      w: 4.8,
-      h: 0.35,
-      ...H2,
-    });
-  }
+  slide.addText([{ text: product.name ?? "", options: { bold: true, fontSize: 18 } }], {
+  x: 0.5, y: 0.5, w: 8, h: 0.5
+});
+
 
   // right: description (autosize-ish via truncation)
   if (p.description) {
