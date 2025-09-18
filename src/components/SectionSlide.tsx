@@ -1,8 +1,7 @@
+// src/components/SectionSlide.tsx
 import React, { useEffect, useMemo, useState } from "react";
 import type { Section } from "../types";
 import { fetchProducts, type ProductRow } from "../api/sheets";
-// at top of src/components/SectionSlide.tsx
-import { pickByHeader, H } from '../utils/headers'; 
 import ProductCard from "./ProductCard";
 
 type Props = {
@@ -17,30 +16,16 @@ export default function SectionSlide({ section, onSelectProduct }: Props) {
   const [items, setItems] = useState<ProductRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
-  // add on top with aliases
-// const H = { ..., SOURCE: ["url", "link"] as const, }
-
-// inside toProduct(..)
-const source = pickByHeader(row, H.SOURCE);
-// ...
-sourceUrl: source ? String(source) : undefined,
-
 
   useEffect(() => {
     let alive = true;
     setLoading(true);
     setErr(null);
     fetchProducts({ q: search, category })
-      .then((rows) => {
-        if (alive) setItems(rows);
-      })
-      .catch((e) => {
-        if (alive) setErr(e?.message || "Failed to load products");
-      })
-      .finally(() => alive && setLoading(false));
-    return () => {
-      alive = false;
-    };
+      .then((rows) => { if (alive) setItems(rows); })
+      .catch((e) => { if (alive) setErr(e?.message || "Failed to load products"); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
   }, [search, category]);
 
   const categories = useMemo(() => {
@@ -69,9 +54,7 @@ sourceUrl: source ? String(source) : undefined,
           >
             <option value="">All categories</option>
             {categories.map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
+              <option key={c} value={c}>{c}</option>
             ))}
           </select>
         </div>
