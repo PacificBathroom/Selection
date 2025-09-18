@@ -15,6 +15,14 @@ export default function SectionSlide({ section, onSelectProduct }: Props) {
   const [items, setItems] = useState<ProductRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  // add on top with aliases
+// const H = { ..., SOURCE: ["url", "link"] as const, }
+
+// inside toProduct(..)
+const source = pickByHeader(row, H.SOURCE);
+// ...
+sourceUrl: source ? String(source) : undefined,
+
 
   useEffect(() => {
     let alive = true;
