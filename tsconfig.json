@@ -8,7 +8,7 @@
     "strict": true,
     "skipLibCheck": true,
     "noEmit": true,
-    "types": []
+    "types": ["vite/client"]
   },
   "include": ["src/**/*"],
   "exclude": ["netlify/functions/**", "dist", "node_modules"]
