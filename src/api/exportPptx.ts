@@ -7,30 +7,58 @@ import * as pdfjsLib from "pdfjs-dist";
 
 const PROXY = (u: string) => `/api/pdf-proxy?url=${encodeURIComponent(u)}`;
 
+// helper builds data: URL from proxy/origin (handles images & pdf-as-image)
 async function fetchAsDataUrl(url?: string): Promise<string | undefined> {
   try {
     if (!url) return undefined;
+
+    // Prefer the proxy (returns raw bytes to the browser)
     const res = await fetch(PROXY(url));
     if (!res.ok) return undefined;
-    const ct = res.headers.get("content-type") ?? "application/octet-stream";
-    const b64 = await res.text();
-    return `data:${ct};base64,${b64}`;
+
+    const contentType = res.headers.get("content-type") || "application/octet-stream";
+    const blob = await res.blob();
+
+    return await new Promise<string>((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(`data:${contentType};base64,${String(reader.result).split(",")[1]}`);
+      reader.readAsDataURL(blob);
+    });
   } catch {
+    // Fallback: try direct CORS fetch
     try {
-      if (!url) return undefined;
-      const res = await fetch(url, { mode: "cors" });
+      const res = await fetch(url!, { mode: "cors" });
       if (!res.ok) return undefined;
       const blob = await res.blob();
       return await new Promise<string>((resolve) => {
-        const r = new FileReader();
-        r.onload = () => resolve(String(r.result));
-        r.readAsDataURL(blob);
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.readAsDataURL(blob);
       });
     } catch {
       return undefined;
     }
   }
 }
+
+// Use proxy for pdf.js as a URL (it returns real bytes)
+async function pdfFirstPageToPng(pdfUrl?: string): Promise<string | undefined> {
+  try {
+    if (!pdfUrl) return undefined;
+    const doc = await (pdfjsLib as any).getDocument({ url: PROXY(pdfUrl), useSystemFonts: true }).promise;
+    const page = await doc.getPage(1);
+    const viewport = page.getViewport({ scale: 1.35 }); // a bit smaller to fit
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d"); if (!ctx) return undefined;
+    canvas.width = viewport.width; canvas.height = viewport.height;
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    return canvas.toDataURL("image/png");
+  } catch {
+    // final fallback: embed the PDF as an image if server returns an image
+    return fetchAsDataUrl(pdfUrl);
+  }
+}
+
 
 function toSpecPairs(p: Product): Array<[string, string]> {
   // supports p.specs (array of {label,value}) or p.specifications (string "Label: Value | ...")
