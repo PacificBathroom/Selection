@@ -17,23 +17,25 @@ const norm = (s: unknown) =>
   String(s ?? "")
     .trim()
     .toLowerCase()
-    .replace(/\s+/g, "")      // drop spaces
-    .replace(/[()]/g, "");    // drop parens
+    .replace(/\s+/g, "")
+    .replace(/[()]/g, "");
 
-const HEADER_ALIASES: Record<keyof Product, string[]> = {
-  name:       ["name", "product", "title"],
-  description:["description", "desc"],
-  imageUrl:   ["imageurl", "image", "thumbnail", "img", "picture"],
-  pdfUrl:     ["pdfurl", "pdf", "specpdfurl", "specifications", "spec_pdf_url", "specpdf"],
-  code:       ["code", "sku", "product_code"],
-  category:   ["category", "type"],
-  price:      ["price", "cost", "rrp"],
-  specs:      ["specs", "specs_bullets", "features"], // optional text/bullets
+const HEADER_ALIASES: Record<
+  "name" | "description" | "imageUrl" | "pdfUrl" | "code" | "category" | "price" | "specs",
+  string[]
+> = {
+  name:        ["name", "product", "title"],
+  description: ["description", "desc"],
+  imageUrl:    ["imageurl", "image", "thumbnail", "img", "picture"],
+  pdfUrl:      ["pdfurl", "pdf", "specpdfurl", "specifications", "spec_pdf_url", "specpdf"],
+  code:        ["code", "sku", "product_code"],
+  category:    ["category", "type"],
+  price:       ["price", "cost", "rrp"],
+  specs:       ["specs", "specs_bullets", "features"],
 };
 
 type RowObj = Record<string, any>;
 
-/** convert an array row -> object using provided header labels */
 function rowArrayToObj(headers: string[], row: any[]): RowObj {
   const obj: RowObj = {};
   headers.forEach((h, i) => {
@@ -42,12 +44,11 @@ function rowArrayToObj(headers: string[], row: any[]): RowObj {
   return obj;
 }
 
-/** given a raw object whose keys are the original headers, pick by alias set */
 function pickByAliases(raw: RowObj, aliases: string[]): any {
-  // Build a lookup of normalizedHeader -> value once
   const lookup: Record<string, any> = {};
   for (const [k, v] of Object.entries(raw)) {
-    lookup[norm(k)] = v;
+    const key = norm(k);
+    if (key) lookup[key] = v;
   }
   for (const a of aliases) {
     const hit = lookup[norm(a)];
@@ -67,22 +68,31 @@ function toProduct(raw: RowObj): Product {
     price:       pickByAliases(raw, HEADER_ALIASES.price),
   };
 
-  // Optional specs text -> bullets
-  const rawSpecs = pickByAliases(raw, HEADER_ALIASES.specs);
-  if (typeof rawSpecs === "string" && rawSpecs.trim()) {
-    p.specs = rawSpecs
-      .split(/\r?\n|\u2022/g)
-      .map((s) => s.trim())
-      .filter(Boolean);
-  }
-
-  // Coerce to strings where appropriate
+  // Normalize to strings where applicable
   if (p.name != null)        p.name = String(p.name);
   if (p.description != null) p.description = String(p.description);
   if (p.imageUrl != null)    p.imageUrl = String(p.imageUrl);
   if (p.pdfUrl != null)      p.pdfUrl = String(p.pdfUrl);
   if (p.code != null)        p.code = String(p.code);
   if (p.category != null)    p.category = String(p.category);
+
+  // Optional specs (string → bullets)
+  const rawSpecs = pickByAliases(raw, HEADER_ALIASES.specs);
+  if (Array.isArray(rawSpecs)) {
+    p.specs = rawSpecs.map((s) => String(s || "").trim()).filter(Boolean);
+  } else if (typeof rawSpecs === "string" && rawSpecs.trim()) {
+    p.specs = rawSpecs
+      .split(/\r?\n|\u2022/g)
+      .map((s: string) => s.trim())
+      .filter(Boolean);
+  }
+
+  // ---- Back-compat aliases ----
+  p.product = p.name;
+  p.sku = p.code;
+  p.image = p.imageUrl;
+  p.thumbnail = p.imageUrl;
+  p.specPdfUrl = p.pdfUrl;
 
   return p;
 }
@@ -113,13 +123,12 @@ async function loadAllProducts(range?: string): Promise<Product[]> {
     }
   }
   if (!sheetName) {
-    // Prefer "Products" sheet if present
     sheetName =
-      wb.SheetNames.find((n) => n.toLowerCase() === "products") ||
+      wb.SheetNames.find((n: string) => n.toLowerCase() === "products") ||
       wb.SheetNames[0];
   }
 
-  const ws = wb.Sheets[sheetName];
+  const ws = wb.Sheets[sheetName as string];
   if (!ws) throw new Error(`Sheet "${sheetName}" not found`);
 
   // Read as matrix so we can auto-find the header row (row containing "Name")
@@ -134,31 +143,26 @@ async function loadAllProducts(range?: string): Promise<Product[]> {
 
   let headerRowIdx = -1;
   for (let i = 0; i < Math.min(matrix.length, 50); i++) {
-    const row = matrix[i] || [];
-    if (row.some((cell) => norm(cell) === "name")) {
+    const row: any[] = matrix[i] || [];
+    if (row.some((cell: unknown) => norm(cell) === "name")) {
       headerRowIdx = i;
       break;
     }
   }
   if (headerRowIdx === -1) headerRowIdx = 0;
 
-  const headers = (matrix[headerRowIdx] || []).map((h) => String(h ?? ""));
-  const dataRows = matrix.slice(headerRowIdx + 1);
+  const headers: string[] = (matrix[headerRowIdx] || []).map((h: unknown) =>
+    String(h ?? "")
+  );
+  const dataRows: any[][] = matrix.slice(headerRowIdx + 1);
 
-  const rawObjects: RowObj[] = dataRows.map((arr) =>
+  const rawObjects: RowObj[] = dataRows.map((arr: any[]) =>
     rowArrayToObj(headers, arr)
   );
 
   const products = rawObjects
     .map(toProduct)
-    .filter(
-      (p) =>
-        p.name ||
-        p.description ||
-        p.imageUrl ||
-        p.pdfUrl ||
-        p.code
-    );
+    .filter((p) => p.name || p.description || p.imageUrl || p.pdfUrl || p.code);
 
   if (!range) __productsCache = products;
   return products;
@@ -173,22 +177,13 @@ export async function fetchProducts(
 
   if (category && category.trim()) {
     const needle = category.trim().toLowerCase();
-    items = items.filter(
-      (p) => (p.category ?? "").toLowerCase() === needle
-    );
+    items = items.filter((p) => (p.category ?? "").toLowerCase() === needle);
   }
 
   if (q && q.trim()) {
     const needle = q.trim().toLowerCase();
     items = items.filter((p) => {
-      const hay = [
-        p.name,
-        p.code,
-        p.description,
-        p.category,
-        p.pdfUrl,
-        p.imageUrl,
-      ]
+      const hay = [p.name, p.code, p.description, p.category, p.pdfUrl, p.imageUrl]
         .filter(Boolean)
         .join(" ")
         .toLowerCase();
