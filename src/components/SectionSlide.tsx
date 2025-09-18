@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import type { Section } from "../types";
 import { fetchProducts, type ProductRow } from "../api/sheets";
+// at top of src/components/SectionSlide.tsx
+import { pickByHeader, H } from '../utils/headers'; 
 import ProductCard from "./ProductCard";
 
 type Props = {
