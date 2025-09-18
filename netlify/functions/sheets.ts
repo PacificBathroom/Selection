@@ -5,6 +5,35 @@ import { google } from "googleapis";
 const SPREADSHEET_ID = process.env.SHEETS_SPREADSHEET_ID!;
 const DEFAULT_RANGE = "Products!A:ZZ";
 
+function authJWT() {
+  const json = process.env.GOOGLE_CREDENTIALS;
+  if (json) {
+    const creds = JSON.parse(json);
+    return new google.auth.JWT({
+      email: creds.client_email,
+      key: creds.private_key,
+      scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"],
+    });
+  }
+  // fallback to two-var method
+  const email = process.env.GOOGLE_CLIENT_EMAIL!;
+  const keyRaw = process.env.GOOGLE_PRIVATE_KEY!;
+  const key = keyRaw.includes("\\n") ? keyRaw.replace(/\\n/g, "\n") : keyRaw;
+  return new google.auth.JWT({
+    email,
+    key,
+    scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"],
+  });
+}
+
+function sheetsClient() {
+  const auth = authJWT();
+  return google.sheets({ version: "v4", auth });
+}
+
+// …(rest of your handler stays the same)
+
+
 function extractUrlFromImageFormula(v: unknown): string | undefined {
   if (typeof v !== "string") return undefined;
   const m = v.trim().match(/^=*\s*IMAGE\s*\(\s*"([^"]+)"\s*(?:,.*)?\)\s*$/i);
