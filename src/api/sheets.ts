@@ -12,101 +12,84 @@ export interface ProductFilter {
 
 let __productsCache: Product[] | null = null;
 
-/* ----------------- helpers ----------------- */
+/* ---------- helpers ---------- */
 const norm = (s: unknown) =>
   String(s ?? "")
     .trim()
     .toLowerCase()
-    .replace(/\s+/g, "")
-    .replace(/[()]/g, "");
+    .replace(/\s+/g, "") // remove spaces
+    .replace(/[()]/g, ""); // drop parens
 
-const HEADER_ALIASES: Record<
-  "name" | "description" | "imageUrl" | "pdfUrl" | "code" | "category" | "price" | "specs",
-  string[]
-> = {
-  name:        ["name", "product", "title"],
-  description: ["description", "desc"],
-  imageUrl:    ["imageurl", "image", "thumbnail", "img", "picture"],
-  pdfUrl:      ["pdfurl", "pdf", "specpdfurl", "specifications", "spec_pdf_url", "specpdf"],
-  code:        ["code", "sku", "product_code"],
-  category:    ["category", "type"],
-  price:       ["price", "cost", "rrp"],
-  specs:       ["specs", "specs_bullets", "features"],
-};
+// Candidate header keys (normalized)
+const H = {
+  NAME: ["name", "product", "title"],
+  IMAGE: ["imageurl", "image", "thumbnail"],
+  DESC: ["description", "desc"],
+  PDF:  ["pdfurl", "pdf", "specpdfurl", "specifications"],
+  CODE: ["code", "product_code", "sku"],
+  CAT:  ["category", "cat"],
+} as const;
 
-type RowObj = Record<string, any>;
+function pickByHeader(
+  row: Record<string, unknown>,
+  cands: readonly string[]
+): unknown {
+  // Map: normalized original header -> original header
+  const headerKeys = Object.keys(row);
+  const byNorm = new Map<string, string>();
+  for (const key of headerKeys) byNorm.set(norm(key), key);
 
-function rowArrayToObj(headers: string[], row: any[]): RowObj {
-  const obj: RowObj = {};
-  for (let i = 0; i < headers.length; i++) {
-    const rawKey = headers[i];
-    const key: string = String(rawKey ?? "").trim();
-    if (key) obj[key] = row[i] ?? "";
-  }
-  return obj;
-}
-
-function pickByAliases(raw: RowObj, aliases: string[]): any {
-  // Build normalized lookup once
-  const lookup: Record<string, any> = {};
-  for (const [k, v] of Object.entries(raw)) {
-    const key = norm(k);
-    if (key) lookup[key] = v;
-  }
-  for (const a of aliases) {
-    const hit = lookup[norm(a)];
-    if (hit !== undefined) return hit;
+  // Try each candidate; return first existing value
+  for (const cand of cands) {
+    const origKey = byNorm.get(norm(cand));
+    if (origKey && origKey in row) return row[origKey];
   }
   return undefined;
 }
 
-function toProduct(raw: RowObj): Product {
+function toProduct(row: Record<string, unknown>): Product {
+  const name = pickByHeader(row, H.NAME);
+  const image = pickByHeader(row, H.IMAGE);
+  const description = pickByHeader(row, H.DESC);
+  const pdf = pickByHeader(row, H.PDF);
+  const code = pickByHeader(row, H.CODE);
+  const category = pickByHeader(row, H.CAT);
+
+  // provide common aliases so existing components are happy
+  const nameStr = name ? String(name) : undefined;
+  const imageStr = image ? String(image) : undefined;
+  const pdfStr = pdf ? String(pdf) : undefined;
+  const codeStr = code ? String(code) : undefined;
+  const catStr = category ? String(category) : undefined;
+
   const p: Product = {
-    name:        pickByAliases(raw, HEADER_ALIASES.name),
-    description: pickByAliases(raw, HEADER_ALIASES.description),
-    imageUrl:    pickByAliases(raw, HEADER_ALIASES.imageUrl),
-    pdfUrl:      pickByAliases(raw, HEADER_ALIASES.pdfUrl),
-    code:        pickByAliases(raw, HEADER_ALIASES.code),
-    category:    pickByAliases(raw, HEADER_ALIASES.category),
-    price:       pickByAliases(raw, HEADER_ALIASES.price),
+    // canonical
+    name: nameStr,
+    description: description ? String(description) : undefined,
+    image: imageStr,
+    imageUrl: imageStr,
+    pdfUrl: pdfStr,
+    specPdfUrl: pdfStr,
+    code: codeStr,
+    category: catStr,
+
+    // legacy/aliases used in some components
+    product: nameStr,
+    thumbnail: imageStr,
+    sku: codeStr,
   };
-
-  // Normalize strings
-  if (p.name != null)        p.name = String(p.name);
-  if (p.description != null) p.description = String(p.description);
-  if (p.imageUrl != null)    p.imageUrl = String(p.imageUrl);
-  if (p.pdfUrl != null)      p.pdfUrl = String(p.pdfUrl);
-  if (p.code != null)        p.code = String(p.code);
-  if (p.category != null)    p.category = String(p.category);
-
-  // Optional specs → array of bullets
-  const rawSpecs = pickByAliases(raw, HEADER_ALIASES.specs);
-  if (Array.isArray(rawSpecs)) {
-    p.specs = rawSpecs.map((s) => String(s || "").trim()).filter(Boolean);
-  } else if (typeof rawSpecs === "string" && rawSpecs.trim()) {
-    p.specs = rawSpecs
-      .split(/\r?\n|\u2022/g)
-      .map((s: string) => s.trim())
-      .filter(Boolean);
-  }
-
-  // Back-compat aliases for the rest of the app
-  p.product = p.name;
-  p.sku = p.code;
-  p.image = p.imageUrl;
-  p.thumbnail = p.imageUrl;
-  p.specPdfUrl = p.pdfUrl;
 
   return p;
 }
 
-/* -------------- workbook loader with header detection -------------- */
+/* ---------- workbook loader with header detection ---------- */
 async function loadAllProducts(range?: string): Promise<Product[]> {
   if (__productsCache && !range) return __productsCache;
 
   const XLSX = await import("xlsx");
   const res = await fetch("/assets/precero.xlsx", { cache: "no-cache" });
   if (!res.ok) throw new Error(`Failed to fetch Excel: ${res.status}`);
+
   const buf = await res.arrayBuffer();
   const wb = XLSX.read(buf, { type: "array" });
 
@@ -127,51 +110,54 @@ async function loadAllProducts(range?: string): Promise<Product[]> {
   }
   if (!sheetName) {
     sheetName =
-      wb.SheetNames.find((n: string) => n.toLowerCase() === "products") ||
+      wb.SheetNames.find((n) => n.toLowerCase() === "products") ||
       wb.SheetNames[0];
   }
 
-  const ws = wb.Sheets[String(sheetName)];
+  const ws = wb.Sheets[sheetName];
   if (!ws) throw new Error(`Sheet "${sheetName}" not found`);
 
-  // Read as matrix so we can auto-find the header row (row containing "Name")
+  // Read as matrix to auto-find header row (one that contains "name")
   const matrix = XLSX.utils.sheet_to_json<any[]>(ws, {
     header: 1,
     defval: "",
     blankrows: false,
     ...(a1 ? { range: a1 } : {}),
-  }) as any[][];
+  }) as unknown as any[][];
 
   if (!Array.isArray(matrix) || matrix.length === 0) return [];
 
   let headerRowIdx = -1;
   for (let i = 0; i < Math.min(matrix.length, 50); i++) {
-    const row: any[] = matrix[i] || [];
-    if (row.some((cell: unknown) => norm(cell) === "name")) {
+    const row = matrix[i] || [];
+    if (row.some((cell) => norm(cell) === "name")) {
       headerRowIdx = i;
       break;
     }
   }
   if (headerRowIdx === -1) headerRowIdx = 0;
 
-  const headers: string[] = (matrix[headerRowIdx] || []).map((h: unknown) =>
-    String(h ?? "")
-  );
-  const dataRows: any[][] = matrix.slice(headerRowIdx + 1);
+  const headers = (matrix[headerRowIdx] || []).map((h) => String(h ?? ""));
+  const dataRows = matrix.slice(headerRowIdx + 1);
 
-  const rawObjects: RowObj[] = dataRows.map((arr: any[]) =>
-    rowArrayToObj(headers, arr)
-  );
+  const objects: Record<string, unknown>[] = dataRows.map((arr) => {
+    const obj: Record<string, unknown> = {};
+    headers.forEach((h, i) => {
+      // guard against out-of-bounds
+      obj[h] = i < arr.length ? arr[i] : "";
+    });
+    return obj;
+  });
 
-  const products = rawObjects
+  const products = objects
     .map(toProduct)
-    .filter((p) => p.name || p.description || p.imageUrl || p.pdfUrl || p.code);
+    .filter((p) => p.name || p.description || p.imageUrl || p.pdfUrl);
 
   if (!range) __productsCache = products;
   return products;
 }
 
-/* ---------------- public API ---------------- */
+/* ---------- public API ---------- */
 export async function fetchProducts(
   params: ProductFilter = {}
 ): Promise<Product[]> {
@@ -180,13 +166,15 @@ export async function fetchProducts(
 
   if (category && category.trim()) {
     const needle = category.trim().toLowerCase();
-    items = items.filter((p) => (p.category ?? "").toLowerCase() === needle);
+    items = items.filter(
+      (p) => (p.category ?? "").toLowerCase() === needle
+    );
   }
 
   if (q && q.trim()) {
     const needle = q.trim().toLowerCase();
     items = items.filter((p) => {
-      const hay = [p.name, p.code, p.description, p.category, p.pdfUrl, p.imageUrl]
+      const hay = [p.name, p.description, p.pdfUrl, p.imageUrl, p.code]
         .filter(Boolean)
         .join(" ")
         .toLowerCase();
