@@ -1,6 +1,5 @@
-// src/components/ProductCard.tsx
 import React from "react";
-import type { Product } from "../types";
+import type { Product } from "@/types";
 
 type Props = {
   product: Product;
@@ -8,29 +7,26 @@ type Props = {
 };
 
 const ProductCard: React.FC<Props> = ({ product, onSelect }) => {
-  const title = product.name || "Untitled";
-  const code = product.code ? String(product.code) : "";
-  const category = product.category ? String(product.category) : "";
-  const price =
-    product.price != null && String(product.price).trim() !== ""
-      ? typeof product.price === "number"
-        ? `$${product.price.toFixed(2)}`
-        : String(product.price)
-      : "";
+  const title = product.name?.toString() || "Untitled";
+  const category = product.category?.toString() || "";
+  const code = product.code?.toString() || "";
+  const img = product.imageUrl || product.image || "";
 
   return (
-    <div className="border rounded-2xl p-3 flex gap-3 hover:shadow">
-      {product.imageUrl ? (
+    <div className="border rounded-2xl p-3 flex gap-3 hover:shadow transition">
+      {/* Image */}
+      {img ? (
         <img
-          src={String(product.imageUrl)}
+          src={img}
           alt={title}
-          className="w-24 h-24 object-cover rounded-xl"
+          className="w-24 h-24 object-cover rounded-xl bg-slate-50"
           loading="lazy"
         />
       ) : (
-        <div className="w-24 h-24 bg-slate-100 rounded-xl" />
+        <div className="w-24 h-24 rounded-xl bg-slate-100" />
       )}
 
+      {/* Details */}
       <div className="flex-1 min-w-0">
         <div className="font-medium truncate">{title}</div>
 
@@ -38,8 +34,6 @@ const ProductCard: React.FC<Props> = ({ product, onSelect }) => {
           {code && <span>Code: {code}</span>}
           {category && <span>Category: {category}</span>}
         </div>
-
-        {price && <div className="mt-1 font-semibold">{price}</div>}
 
         {product.description ? (
           <p className="mt-1 text-sm text-slate-700 line-clamp-2">
