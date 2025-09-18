@@ -1,7 +1,8 @@
-// netlify/functions/pdf-proxy.js
-exports.handler = async (event) => {
+import type { Handler } from "@netlify/functions";
+
+export const handler: Handler = async (event) => {
   try {
-    const url = (event.queryStringParameters && event.queryStringParameters.url) || "";
+    const url = event.queryStringParameters?.url || "";
     if (!url) {
       return { statusCode: 400, body: "Missing ?url=" };
     }
@@ -12,7 +13,8 @@ exports.handler = async (event) => {
     }
 
     const arrayBuf = await upstream.arrayBuffer();
-    const contentType = upstream.headers.get("content-type") || "application/octet-stream";
+    const contentType =
+      upstream.headers.get("content-type") || "application/octet-stream";
 
     return {
       statusCode: 200,
@@ -20,11 +22,10 @@ exports.handler = async (event) => {
         "content-type": contentType,
         "cache-control": "public, max-age=3600",
       },
-      // return bytes (Base64 encoded for the platform), browser receives **raw bytes**
       isBase64Encoded: true,
       body: Buffer.from(arrayBuf).toString("base64"),
     };
-  } catch (e) {
+  } catch (e: any) {
     return { statusCode: 500, body: `Proxy error: ${e?.message || e}` };
   }
 };
