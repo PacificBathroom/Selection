@@ -15,3 +15,11 @@
   },
   "include": ["src"]
 }
+}
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit --pretty false",
+    "build:ci": "npm run typecheck && vite build"
+  }
+}
