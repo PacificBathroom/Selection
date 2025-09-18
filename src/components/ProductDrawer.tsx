@@ -9,7 +9,6 @@ type Props = {
 };
 
 export default function ProductDrawer({ section, onUpdate }: Props) {
-  // Guarantee concrete values to satisfy Section’s required fields
   const title: string = section.title ?? "";
   const products: Product[] = Array.isArray(section.products) ? section.products : [];
 
