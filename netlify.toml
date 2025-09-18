@@ -1,23 +1,24 @@
-# netlify.toml
 [build]
-  command = "npm install --no-audit --no-fund --loglevel verbose && npm run build"
+  command = "npm install --no-audit --no-fund --loglevel verbose && npm run build:ci"
   publish = "dist"
-  environment = [
-    "NETLIFY_BUILD_DEBUG",
-    "NODE_VERSION",
-    "NPM_CONFIG_LOGLEVEL",
-    "NPM_CONFIG_OPTIONAL",
-    "ROLLUP_DISABLE_NATIVE"
-  ]
 
+[build.environment]
+  NODE_VERSION = "20"
+  NPM_CONFIG_OPTIONAL = "false"
+  NPM_CONFIG_LOGLEVEL = "verbose"
+  ROLLUP_DISABLE_NATIVE = "true"
+
+# Use the esbuild bundler for any Netlify Functions (future-proofing)
 [functions]
   node_bundler = "esbuild"
 
+# Optional API mount (kept even if you're client-only today)
 [[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/:splat"
   status = 200
 
+# SPA fallback
 [[redirects]]
   from = "/*"
   to = "/index.html"
