@@ -54,4 +54,165 @@ async function pdfFirstPageToPng(pdfUrl?: string): Promise<string | undefined> {
     const canvas = document.createElement("canvas");
     const ctx = canvas.getContext("2d");
     if (!ctx) return undefined;
-    canvas.width = viewpo
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    return canvas.toDataURL("image/png");
+  } catch {
+    return fetchAsDataUrl(pdfUrl);
+  }
+}
+
+function toSpecPairs(p: Product): Array<[string, string]> {
+  const rows: Array<[string, string]> = [];
+  if (Array.isArray(p.specs)) {
+    for (const it of p.specs) {
+      const label = String(it?.label ?? "").trim();
+      const value = String(it?.value ?? "").trim();
+      if (label || value) rows.push([label, value]);
+    }
+  } else if (typeof (p as any).specifications === "string") {
+    const specStr = (p as any).specifications as string;
+    const parts = specStr
+      .split(/\r?\n|\|/)
+      .map((s: string) => s.trim()) // 👈 fixes TS7006
+      .filter(Boolean);
+    for (const part of parts) {
+      const m = part.match(/^(.+?)\s*[:\-–]\s*(.+)$/);
+      if (m) rows.push([m[1].trim(), m[2].trim()]);
+      else rows.push(["", part]);
+    }
+  }
+  return rows.slice(0, 10);
+}
+
+export async function exportSelectionToPptx(products: Product[], client: ClientInfo) {
+  const pptx = new PptxGenJS(); // 👈 ensure this is BEFORE any pptx.ShapeType usage
+  pptx.title = client.projectName || "Product Presentation";
+  pptx.layout = "LAYOUT_16x9";
+
+  const brand = {
+    bg: "FFFFFF",
+    text: "0F172A",
+    accent: "1E6BD7",
+    faint: "F1F5F9",
+    bar: "0EA5E9",
+    tableRow: ["F8FAFC", "FFFFFF"] as const,
+  };
+
+  // cover
+  {
+    const s = pptx.addSlide();
+    s.background = { color: brand.bg };
+    s.addText(client.projectName || "Project Selection", {
+      x: 0.8, y: 1.4, w: 8.5, h: 1, fontFace: "Inter", fontSize: 40, bold: true, color: brand.text,
+    } as any);
+    if (client.clientName) {
+      s.addText(`Client: ${client.clientName}`, {
+        x: 0.8, y: 2.4, w: 8.5, h: 0.6, fontFace: "Inter", fontSize: 20, color: brand.text,
+      } as any);
+    }
+    if (client.dateISO) {
+      s.addText(client.dateISO, {
+        x: 0.8, y: 3.0, w: 8.5, h: 0.5, fontFace: "Inter", fontSize: 14, color: "666666",
+      } as any);
+    }
+  }
+
+  // layout constants
+  const L = {
+    leftImg:   { x: 0.6,  y: 1.0, w: 5.0, h: 3.6 },
+    rightPane: { x: 6.0,  y: 1.0, w: 3.6, h: 3.9 },
+    rightTitle:{ x: 6.0,  y: 1.0, w: 3.6, h: 0.7 },
+    rightSku:  { x: 6.0,  y: 1.7, w: 3.6, h: 0.4 },
+    rightTableY: 2.2,
+    descBox:   { x: 0.6,  y: 4.45, w: 9.0, h: 0.55 },
+    bottomBar: { x: 0.0,  y: 5.30, w: 10.0, h: 0.23 },
+    codeText:  { x: 0.7,  y: 5.05, w: 4.5, h: 0.25 },
+  } as const;
+
+  for (const p of products) {
+    // helpful debug to verify what we received
+    console.log("PPT item", {
+      title: p.name || p.product,
+      imageUrl: p.imageUrl || p.image || p.thumbnail,
+      pdfUrl: p.pdfUrl || p.specPdfUrl,
+      hasSpecsArray: Array.isArray((p as any).specs),
+      specsCount: Array.isArray((p as any).specs) ? (p as any).specs.length : 0,
+      specifications: (p as any).specifications?.slice?.(0, 80),
+    });
+
+    const s = pptx.addSlide();
+    s.background = { color: brand.bg };
+
+    const title = p.name || p.product || "Untitled Product";
+    const code  = p.code || p.sku || "";
+    const url   = (p as any).url || p.pdfUrl || p.specPdfUrl;
+    const imgUrl = p.imageUrl || p.image || p.thumbnail;
+
+    // left image
+    const imgData = await fetchAsDataUrl(imgUrl);
+    if (imgData) {
+      s.addImage({ data: imgData, ...L.leftImg, sizing: { type: "contain", w: L.leftImg.w, h: L.leftImg.h } } as any);
+    } else {
+      s.addShape(pptx.ShapeType.roundRect, {
+        ...L.leftImg, fill: { color: brand.faint }, line: { color: "D0D7E2", width: 1 },
+      } as any);
+    }
+
+    // right title
+    s.addText(title, {
+      ...L.rightTitle, fontFace: "Inter", fontSize: 20, bold: true, color: brand.text, align: "left",
+    } as any);
+
+    // right SKU/code (hyperlinked if url)
+    const skuText = code || (p.product ?? p.name ?? "");
+    if (skuText) {
+      s.addText(
+        [{ text: skuText, options: { hyperlink: url ? { url: String(url) } : undefined, color: brand.accent, underline: { style: "heavy" }, fontSize: 14 } }],
+        { ...L.rightSku, fontFace: "Inter", fontSize: 14, align: "left" } as any
+      );
+    }
+
+    // specs table
+    const pairs = toSpecPairs(p);
+    if (pairs.length) {
+      const rows = pairs.map(([label, value], i) => ([
+        { text: label || "", options: { bold: true, fontSize: 12, fill: { color: brand.tableRow[i % 2] } } },
+        { text: value || "", options: { fontSize: 12, fill: { color: brand.tableRow[i % 2] } } },
+      ]));
+      s.addTable(rows as any, {
+        x: L.rightPane.x, y: L.rightTableY, w: L.rightPane.w,
+        colW: [1.6, 2.1],
+        border: { style: "none" },
+        margin: 0.04,
+      } as any);
+    } else if (url) {
+      // show first PDF page if we have a PDF link but no structured specs
+      const thumb = await pdfFirstPageToPng(p.pdfUrl || p.specPdfUrl);
+      if (thumb) {
+        s.addImage({ data: thumb, x: L.rightPane.x, y: L.rightTableY, w: L.rightPane.w, h: 2.7,
+          sizing: { type: "contain", w: L.rightPane.w, h: 2.7 } } as any);
+      }
+    }
+
+    // description (centered, auto-shrink)
+    if (p.description) {
+      s.addText(p.description, {
+        ...L.descBox, align: "center", fontFace: "Inter", fontSize: 13, color: "344054", fit: "shrink",
+      } as any);
+    }
+
+    // bottom bar + code
+    s.addShape(pptx.ShapeType.rect, {
+      ...L.bottomBar, fill: { color: brand.bar }, line: { color: brand.bar },
+    } as any);
+    if (code) {
+      s.addText(code, { ...L.codeText, fontFace: "Inter", fontSize: 12, color: "111111" } as any);
+    }
+  }
+
+  await pptx.writeFile({ fileName: "Product-Presentation.pptx" } as any);
+}
+
+export const exportPptx = exportSelectionToPptx;
