@@ -1,81 +1,73 @@
-/* ---------- workbook loader with header detection ---------- */
-async function loadAllProducts(range?: string): Promise<Product[]> {
-  if (__productsCache && !range) return __productsCache;
+// netlify/functions/sheets.ts
+import type { Handler } from "@netlify/functions";
+import { google } from "googleapis";
 
-  const XLSX = await import("xlsx");
-  const res = await fetch("/assets/precero.xlsx", { cache: "no-cache" });
+const SPREADSHEET_ID = process.env.SHEETS_SPREADSHEET_ID!; // set in Netlify env
+const DEFAULT_RANGE = "Products!A:ZZ";
 
-  if (!res.ok) {
-    throw new Error(
-      `❌ Could not load product data. Expected /assets/precero.xlsx but got ${res.status} ${res.statusText}.
-Make sure the file exists in /public/assets/precero.xlsx and is deployed correctly.`
-    );
-  }
+// IMAGE("url", ...) formula parser → returns the first quoted URL if present
+function extractUrlFromImageFormula(v: unknown): string | undefined {
+  if (typeof v !== "string") return undefined;
+  const s = v.trim();
+  // Handles =IMAGE("...") and =IMAGE("...", 1) etc.
+  const m = s.match(/^=*\s*IMAGE\s*\(\s*"([^"]+)"\s*(?:,.*)?\)\s*$/i);
+  return m?.[1];
+}
 
+function normalizeCell(v: unknown): unknown {
+  // If it looks like =IMAGE("..."), convert to the URL string
+  const imageUrl = extractUrlFromImageFormula(v);
+  if (imageUrl) return imageUrl;
+
+  // Pass everything else through
+  return v;
+}
+
+function authSheets() {
+  const client = new google.auth.JWT({
+    email: process.env.GOOGLE_CLIENT_EMAIL,
+    key: (process.env.GOOGLE_PRIVATE_KEY || "").replace(/\\n/g, "\n"),
+    scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"],
+  });
+  return google.sheets({ version: "v4", auth: client });
+}
+
+export const handler: Handler = async (event) => {
   try {
-    const buf = await res.arrayBuffer();
-    const wb = XLSX.read(buf, { type: "array" });
+    const qs = new URLSearchParams(event.queryStringParameters as any);
+    const range = qs.get("range") || DEFAULT_RANGE;
 
-    // Resolve sheet + optional A1 range
-    let sheetName: string | undefined;
-    let a1: string | undefined;
+    const sheets = authSheets();
+    const resp = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range,
+      // We want raw values or formulas, not the rendered image blob
+      valueRenderOption: "FORMULA",
+    });
 
-    if (range) {
-      if (range.includes("!")) {
-        const [sn, r] = range.split("!");
-        sheetName = sn || undefined;
-        a1 = r || undefined;
-      } else if (/^[A-Z]+(?:\d+)?:[A-Z]+(?:\d+)?$/i.test(range)) {
-        a1 = range;
-      } else {
-        sheetName = range;
-      }
-    }
-    if (!sheetName) {
-      sheetName = wb.SheetNames.find((n) => n.toLowerCase() === "products") || wb.SheetNames[0];
+    const values = resp.data.values || [];
+    if (!values.length) {
+      return { statusCode: 200, body: "[]" };
     }
 
-    const ws = wb.Sheets[sheetName];
-    if (!ws) throw new Error(`❌ Sheet "${sheetName}" not found in precero.xlsx`);
-
-    // Read as matrix to auto-find header row (one that contains "name")
-    const matrix = XLSX.utils.sheet_to_json<any[]>(ws, {
-      header: 1,
-      defval: "",
-      blankrows: false,
-      ...(a1 ? { range: a1 } : {}),
-    }) as any[][];
-
-    if (!Array.isArray(matrix) || matrix.length === 0) {
-      throw new Error("❌ precero.xlsx is empty or could not be read.");
-    }
-
-    let headerRowIdx = -1;
-    for (let i = 0; i < Math.min(matrix.length, 50); i++) {
-      const row = matrix[i] || [];
-      if (row.some((cell) => norm(cell) === "name")) {
-        headerRowIdx = i;
-        break;
-      }
-    }
-    if (headerRowIdx === -1) headerRowIdx = 0;
-
-    const headers = (matrix[headerRowIdx] || []).map((h: any) => String(h ?? ""));
-    const dataRows = matrix.slice(headerRowIdx + 1);
-
-    const objects: Record<string, any>[] = dataRows.map((arr) => {
-      const obj: Record<string, any> = {};
-      headers.forEach((h, i) => (obj[h] = arr[i]));
+    const headers = (values[0] || []).map((h: any) => String(h ?? ""));
+    const rows = values.slice(1).map((arr: unknown[]) => {
+      const obj: Record<string, unknown> = {};
+      headers.forEach((h, i) => {
+        obj[h] = normalizeCell(arr[i]);
+      });
       return obj;
     });
 
-    const products = objects
-      .map(toProduct)
-      .filter((p) => p.name || p.description || p.imageUrl || p.pdfUrl);
-
-    if (!range) __productsCache = products;
-    return products;
-  } catch (err: any) {
-    throw new Error(`❌ Failed to parse precero.xlsx: ${err.message}`);
+    return {
+      statusCode: 200,
+      headers: { "content-type": "application/json", "cache-control": "no-cache" },
+      body: JSON.stringify(rows),
+    };
+  } catch (e: any) {
+    return {
+      statusCode: 500,
+      body: JSON.stringify({ error: e?.message || "Sheets read error" }),
+    };
   }
-}
+};
