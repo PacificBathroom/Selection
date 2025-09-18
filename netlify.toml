@@ -1,5 +1,7 @@
+# netlify.toml — valid TOML
+
 [build]
-  command = "npm install --no-audit --no-fund --loglevel verbose && npm run build:ci"
+  command = "npm install --no-audit --no-fund --loglevel verbose && npm run build"
   publish = "dist"
 
 [build.environment]
@@ -7,18 +9,18 @@
   NPM_CONFIG_OPTIONAL = "false"
   NPM_CONFIG_LOGLEVEL = "verbose"
   ROLLUP_DISABLE_NATIVE = "true"
+  NETLIFY_BUILD_DEBUG = "true"
 
-# Use the esbuild bundler for any Netlify Functions (future-proofing)
 [functions]
   node_bundler = "esbuild"
 
-# Optional API mount (kept even if you're client-only today)
+# Mount any Netlify Functions under /api/*
 [[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/:splat"
   status = 200
 
-# SPA fallback
+# SPA fallback for Vite app
 [[redirects]]
   from = "/*"
   to = "/index.html"
