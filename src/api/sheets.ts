@@ -1,7 +1,6 @@
 // src/api/sheets.ts
-import type { Product } from "@/types";
+import type { Product } from "../types";
 
-/** Public shape the rest of the app uses */
 export type ProductRow = Product;
 
 export interface ProductFilter {
@@ -11,72 +10,84 @@ export interface ProductFilter {
   range?: string;
 }
 
-/* ----------------- small utils ----------------- */
-const norm = (s: unknown): string =>
+let __productsCache: Product[] | null = null;
+
+/* ---------- helpers ---------- */
+const norm = (s: unknown) =>
   String(s ?? "")
     .trim()
     .toLowerCase()
-    .replace(/\s+/g, "") // remove spaces
-    .replace(/[()]/g, ""); // drop parens
+    .replace(/\s+/g, "")
+    .replace(/[()]/g, "");
 
-// Canonical header aliases (normalize before comparing)
-const ALIAS = {
+// Canonical header keys (normalized)
+const HEADER_KEYS = {
   NAME: ["name", "product", "title"],
-  IMAGE: ["imageurl", "image", "thumbnail"],
-  DESC: ["description", "desc"],
-  PDF: ["pdfurl", "pdf", "specpdfurl", "specifications", "specsheet"],
-  CODE: ["code", "product_code", "sku"],
-  CATEGORY: ["category", "type"],
+  IMAGE: ["imageurl", "image", "thumbnail", "imgurl", "picture", "photo"],
+  DESC: ["description", "desc", "details"],
+  PDF: ["pdfurl", "pdf", "specpdfurl", "specifications", "specsurl"],
+  CODE: ["code", "product_code", "sku", "partnumber", "itemcode"],
 } as const;
 
-let cache: ProductRow[] | null = null;
-
-/* Pick value from a row using alias list */
-function pickByAliases(
-  row: Record<string, unknown>,
-  aliases: readonly string[]
-): unknown {
-  // Build a normalized lookup once per row call
-  const normalized: Record<string, unknown> = {};
-  for (const k of Object.keys(row)) {
-    normalized[norm(k)] = row[k];
-  }
-
-  for (const a of aliases) {
-    const key = norm(a);
-    if (Object.prototype.hasOwnProperty.call(normalized, key)) {
-      return normalized[key];
+// pick value from a raw row by matching header variants
+function pickByHeader(row: Record<string, any>, candidates: string[]) {
+  for (const key of Object.keys(row)) {
+    const nk = norm(key);
+    if (candidates.some((c) => c === nk)) {
+      return row[key];
     }
   }
   return undefined;
 }
 
-/** Convert a raw object row to our ProductRow */
-function toProduct(row: Record<string, unknown>): ProductRow {
-  const name = pickByAliases(row, ALIAS.NAME);
-  const image = pickByAliases(row, ALIAS.IMAGE);
-  const desc = pickByAliases(row, ALIAS.DESC);
-  const pdf = pickByAliases(row, ALIAS.PDF);
-  const code = pickByAliases(row, ALIAS.CODE);
-  const category = pickByAliases(row, ALIAS.CATEGORY);
+// Map a raw row object into our Product
+function toProduct(row: Record<string, any>): Product {
+  const name = pickByHeader(row, HEADER_KEYS.NAME);
+  const image = pickByHeader(row, HEADER_KEYS.IMAGE);
+  const description = pickByHeader(row, HEADER_KEYS.DESC);
+  const pdf = pickByHeader(row, HEADER_KEYS.PDF);
+  const code = pickByHeader(row, HEADER_KEYS.CODE);
 
-  const p: ProductRow = {
+  const p: Product = {
     name: name ? String(name) : undefined,
-    description: desc ? String(desc) : undefined,
-    image: image ? String(image) : undefined,
+    product: name ? String(name) : undefined, // alias
+    description: description ? String(description) : undefined,
+
     imageUrl: image ? String(image) : undefined,
+    image: image ? String(image) : undefined,
+    thumbnail: image ? String(image) : undefined,
+
     pdfUrl: pdf ? String(pdf) : undefined,
     specPdfUrl: pdf ? String(pdf) : undefined,
+
     code: code ? String(code) : undefined,
-    category: category ? String(category) : undefined,
+    sku: code ? String(code) : undefined,
   };
+
+  // carry any extra properties through (just in case you added custom columns)
+  for (const k of Object.keys(row)) {
+    const v = row[k];
+    if (v === "" || v == null) continue;
+    const nk = norm(k);
+    if (
+      ![
+        ...HEADER_KEYS.NAME,
+        ...HEADER_KEYS.IMAGE,
+        ...HEADER_KEYS.DESC,
+        ...HEADER_KEYS.PDF,
+        ...HEADER_KEYS.CODE,
+      ].includes(nk)
+    ) {
+      p[k] = v;
+    }
+  }
 
   return p;
 }
 
-/* ----------------- workbook loader ----------------- */
-async function loadAllProducts(range?: string): Promise<ProductRow[]> {
-  if (cache && !range) return cache;
+/* ---------- workbook loader with header detection ---------- */
+async function loadAllProducts(range?: string): Promise<Product[]> {
+  if (__productsCache && !range) return __productsCache;
 
   const XLSX = await import("xlsx");
   const res = await fetch("/assets/precero.xlsx", { cache: "no-cache" });
@@ -100,21 +111,20 @@ async function loadAllProducts(range?: string): Promise<ProductRow[]> {
       sheetName = range;
     }
   }
-
   if (!sheetName) {
-    // Prefer a sheet actually named "Products"
-    const preferred = wb.SheetNames.find((n) => n.toLowerCase() === "products");
-    sheetName = preferred || wb.SheetNames[0];
+    sheetName =
+      wb.SheetNames.find((n) => n.toLowerCase() === "products") ||
+      wb.SheetNames[0];
   }
 
   const ws = wb.Sheets[sheetName];
   if (!ws) throw new Error(`Sheet "${sheetName}" not found`);
 
-  // Read matrix for header detection (find a row that contains "name")
+  // Read as matrix to auto-find header row (one that contains "name")
   const matrix = XLSX.utils.sheet_to_json<any[]>(ws, {
     header: 1,
-    blankrows: false,
     defval: "",
+    blankrows: false,
     ...(a1 ? { range: a1 } : {}),
   }) as any[][];
 
@@ -123,7 +133,7 @@ async function loadAllProducts(range?: string): Promise<ProductRow[]> {
   let headerRowIdx = -1;
   for (let i = 0; i < Math.min(matrix.length, 50); i++) {
     const row = matrix[i] || [];
-    if (row.some((cell: unknown) => norm(cell) === "name")) {
+    if (row.some((cell) => norm(cell) === "name")) {
       headerRowIdx = i;
       break;
     }
@@ -133,32 +143,31 @@ async function loadAllProducts(range?: string): Promise<ProductRow[]> {
   const headers: string[] = (matrix[headerRowIdx] || []).map((h) =>
     String(h ?? "")
   );
-  const dataRows: any[][] = matrix.slice(headerRowIdx + 1);
+  const dataRows = matrix.slice(headerRowIdx + 1);
 
-  // Build objects safely (guard against undefined header indices)
-  const objects: Record<string, unknown>[] = dataRows.map((arr) => {
-    const obj: Record<string, unknown> = {};
+  // Build objects safely (skip undefined header keys)
+  const objects: Record<string, any>[] = dataRows.map((arr) => {
+    const obj: Record<string, any> = {};
     headers.forEach((h, i) => {
-      // only assign if the index exists in the row
-      if (i in arr) obj[h] = arr[i];
+      if ((h ?? "") !== "") {
+        obj[h] = arr[i];
+      }
     });
     return obj;
   });
 
   const products = objects
     .map(toProduct)
-    .filter(
-      (p) => p.name || p.description || p.imageUrl || p.pdfUrl
-    );
+    .filter((p) => p.name || p.description || p.imageUrl || p.pdfUrl);
 
-  if (!range) cache = products;
+  if (!range) __productsCache = products;
   return products;
 }
 
-/* ----------------- public API ----------------- */
+/* ---------- public API ---------- */
 export async function fetchProducts(
   params: ProductFilter = {}
-): Promise<ProductRow[]> {
+): Promise<Product[]> {
   const { q, category, range } = params;
   let items = await loadAllProducts(range);
 
@@ -172,7 +181,7 @@ export async function fetchProducts(
   if (q && q.trim()) {
     const needle = q.trim().toLowerCase();
     items = items.filter((p) => {
-      const hay = [p.name, p.description, p.pdfUrl, p.imageUrl, p.code, p.category]
+      const hay = [p.name, p.description, p.pdfUrl, p.imageUrl, p.code]
         .filter(Boolean)
         .join(" ")
         .toLowerCase();
