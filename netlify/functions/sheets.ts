@@ -1,21 +1,26 @@
-// netlify/functions/sheets.ts
 import type { Handler } from "@netlify/functions";
 import { google } from "googleapis";
 
 const SPREADSHEET_ID = process.env.SHEETS_SPREADSHEET_ID!;
 const DEFAULT_RANGE = "Products!A:ZZ";
 
+function extractUrlFromImageFormula(v: unknown): string | undefined {
+  if (typeof v !== "string") return undefined;
+  const m = v.trim().match(/^=*\s*IMAGE\s*\(\s*"([^"]+)"\s*(?:,.*)?\)\s*$/i);
+  return m?.[1];
+}
+const normalizeCell = (v: unknown) => extractUrlFromImageFormula(v) ?? v;
+
 function authJWT() {
-  const json = process.env.GOOGLE_CREDENTIALS;
-  if (json) {
-    const creds = JSON.parse(json);
+  const credsJson = process.env.GOOGLE_CREDENTIALS;
+  if (credsJson) {
+    const creds = JSON.parse(credsJson);
     return new google.auth.JWT({
       email: creds.client_email,
       key: creds.private_key,
       scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"],
     });
   }
-  // fallback to two-var method
   const email = process.env.GOOGLE_CLIENT_EMAIL!;
   const keyRaw = process.env.GOOGLE_PRIVATE_KEY!;
   const key = keyRaw.includes("\\n") ? keyRaw.replace(/\\n/g, "\n") : keyRaw;
@@ -31,35 +36,13 @@ function sheetsClient() {
   return google.sheets({ version: "v4", auth });
 }
 
-// …(rest of your handler stays the same)
-
-
-function extractUrlFromImageFormula(v: unknown): string | undefined {
-  if (typeof v !== "string") return undefined;
-  const m = v.trim().match(/^=*\s*IMAGE\s*\(\s*"([^"]+)"\s*(?:,.*)?\)\s*$/i);
-  return m?.[1];
-}
-const normalizeCell = (v: unknown) => extractUrlFromImageFormula(v) ?? v;
-
-function sheetsClient() {
-  const credsJson = process.env.GOOGLE_CREDENTIALS;
-  if (!credsJson) throw new Error("Missing GOOGLE_CREDENTIALS");
-
-  const creds = JSON.parse(credsJson); // { client_email, private_key, ... }
-  const auth = new google.auth.JWT({
-    email: creds.client_email,
-    key: creds.private_key, // already correctly formatted
-    scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"],
-  });
-
-  return google.sheets({ version: "v4", auth });
-}
-
 export const handler: Handler = async (event) => {
   try {
-    const range = new URLSearchParams(event.queryStringParameters as any).get("range") || DEFAULT_RANGE;
-    const sheets = sheetsClient();
+    const range =
+      new URLSearchParams(event.queryStringParameters as any).get("range") ||
+      DEFAULT_RANGE;
 
+    const sheets = sheetsClient();
     const resp = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
       range,
@@ -78,10 +61,16 @@ export const handler: Handler = async (event) => {
 
     return {
       statusCode: 200,
-      headers: { "content-type": "application/json", "cache-control": "no-cache" },
+      headers: {
+        "content-type": "application/json",
+        "cache-control": "no-cache",
+      },
       body: JSON.stringify(rows),
     };
   } catch (e: any) {
-    return { statusCode: 500, body: JSON.stringify({ error: e?.message || "Sheets read error" }) };
+    return {
+      statusCode: 500,
+      body: JSON.stringify({ error: e?.message || "Sheets read error" }),
+    };
   }
 };
