@@ -1,3 +1,4 @@
+// netlify/functions/sheets.ts
 import type { Handler } from "@netlify/functions";
 import { google } from "googleapis";
 
@@ -9,25 +10,27 @@ function extractUrlFromImageFormula(v: unknown): string | undefined {
   const m = v.trim().match(/^=*\s*IMAGE\s*\(\s*"([^"]+)"\s*(?:,.*)?\)\s*$/i);
   return m?.[1];
 }
-function normalizeCell(v: unknown): unknown {
-  return extractUrlFromImageFormula(v) ?? v;
-}
+const normalizeCell = (v: unknown) => extractUrlFromImageFormula(v) ?? v;
 
-function authSheets() {
-  const client = new google.auth.JWT({
-    email: process.env.GOOGLE_CLIENT_EMAIL,
-    key: (process.env.GOOGLE_PRIVATE_KEY || "").replace(/\\n/g, "\n"),
+function sheetsClient() {
+  const credsJson = process.env.GOOGLE_CREDENTIALS;
+  if (!credsJson) throw new Error("Missing GOOGLE_CREDENTIALS");
+
+  const creds = JSON.parse(credsJson); // { client_email, private_key, ... }
+  const auth = new google.auth.JWT({
+    email: creds.client_email,
+    key: creds.private_key, // already correctly formatted
     scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"],
   });
-  return google.sheets({ version: "v4", auth: client });
+
+  return google.sheets({ version: "v4", auth });
 }
 
 export const handler: Handler = async (event) => {
   try {
-    const qs = new URLSearchParams(event.queryStringParameters as any);
-    const range = qs.get("range") || DEFAULT_RANGE;
+    const range = new URLSearchParams(event.queryStringParameters as any).get("range") || DEFAULT_RANGE;
+    const sheets = sheetsClient();
 
-    const sheets = authSheets();
     const resp = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
       range,
