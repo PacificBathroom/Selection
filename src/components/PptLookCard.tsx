@@ -1,20 +1,8 @@
 // src/components/PptLookCard.tsx
 import { slideTheme as t } from "../theme/slideTheme";
-import type { ProductRow } from "../api/sheets";
+import type { Product } from "../types";
 
-export function PptLookCard({ p, logoUrl }: { p: ProductRow; logoUrl?: string }) {
-  const title = p.name ?? p.product?.name ?? "Untitled product";
-  const thumb = p.thumbnail ?? p.imageUrl ?? p.image;
-  const sku = p.sku ? String(p.sku) : p.code ? String(p.code) : "";
-  const category = p.category ? String(p.category) : "";
-
-  const priceText =
-    p.price != null && String(p.price).trim() !== ""
-      ? typeof p.price === "number"
-        ? `$${p.price.toFixed(2)}`
-        : String(p.price)
-      : "";
-
+export function PptLookCard({ p, logoUrl }: { p: Product; logoUrl?: string }) {
   return (
     <div
       style={{
@@ -28,11 +16,16 @@ export function PptLookCard({ p, logoUrl }: { p: ProductRow; logoUrl?: string })
         gap: "16px",
       }}
     >
-      {thumb ? (
+      {p.imageUrl ? (
         <img
-          src={String(thumb)}
-          alt={title}
-          style={{ width: 140, height: 140, objectFit: "cover", borderRadius: 12 }}
+          src={String(p.imageUrl)}
+          alt={String(p.name || "Product")}
+          style={{
+            width: "140px",
+            height: "140px",
+            objectFit: "cover",
+            borderRadius: "12px",
+          }}
           loading="lazy"
         />
       ) : (
@@ -40,16 +33,29 @@ export function PptLookCard({ p, logoUrl }: { p: ProductRow; logoUrl?: string })
       )}
 
       <div>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-          <h3 style={{ color: t.title, fontSize: 20, fontWeight: 700, margin: 0 }}>{title}</h3>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: 8,
+          }}
+        >
+          <h3 style={{ color: t.title, fontSize: 20, fontWeight: 700, margin: 0 }}>
+            {p.name || "Untitled product"}
+          </h3>
           {logoUrl ? (
-            <img src={logoUrl} alt="Logo" style={{ height: 28, objectFit: "contain", opacity: 0.9 }} />
+            <img
+              src={logoUrl}
+              alt="Logo"
+              style={{ height: 28, objectFit: "contain", opacity: 0.9 }}
+            />
           ) : null}
         </div>
 
         <div style={{ color: t.meta, fontSize: 12, marginBottom: 8 }}>
-          {sku && <>SKU/Code: {sku} · </>}
-          {category && <>Category: {category}</>}
+          {p.code ? <>Code: {p.code} · </> : null}
+          {p.category ? <>Category: {p.category}</> : null}
         </div>
 
         {p.description ? (
@@ -59,7 +65,11 @@ export function PptLookCard({ p, logoUrl }: { p: ProductRow; logoUrl?: string })
           </p>
         ) : null}
 
-        {priceText ? <div style={{ marginTop: 10, fontWeight: 700 }}>{priceText}</div> : null}
+        {p.price != null && String(p.price).trim() !== "" ? (
+          <div style={{ marginTop: 10, fontWeight: 700 }}>
+            {typeof p.price === "number" ? `$${p.price.toFixed(2)}` : p.price}
+          </div>
+        ) : null}
       </div>
     </div>
   );
