@@ -6,14 +6,10 @@
     "moduleResolution": "Bundler",
     "jsx": "react-jsx",
     "strict": true,
-    "isolatedModules": true,
-    "resolveJsonModule": true,
-    "noEmit": true,
     "skipLibCheck": true,
-    "baseUrl": ".",
-    "paths": {
-      "@/*": ["src/*"]
-    }
+    "noEmit": true,
+    "types": []
   },
-  "include": ["src"]
+  "include": ["src/**/*"],
+  "exclude": ["netlify/functions/**", "dist", "node_modules"]
 }
