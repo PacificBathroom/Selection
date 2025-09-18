@@ -12,6 +12,7 @@ export interface ClientInfo {
 
 export interface Product {
   // Primary
+  id?: string;
   name?: string;
   description?: string;
   imageUrl?: string;
