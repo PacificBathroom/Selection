@@ -87,18 +87,32 @@ function toSpecPairs(p: Product): Array<[string, string]> {
 }
 
 export async function exportSelectionToPptx(products: Product[], client: ClientInfo) {
-  const pptx = new PptxGenJS(); // 👈 ensure this is BEFORE any pptx.ShapeType usage
+  const pptx = new PptxGenJS();
   pptx.title = client.projectName || "Product Presentation";
   pptx.layout = "LAYOUT_16x9";
 
-  const brand = {
-    bg: "FFFFFF",
-    text: "0F172A",
-    accent: "1E6BD7",
-    faint: "F1F5F9",
-    bar: "0EA5E9",
-    tableRow: ["F8FAFC", "FFFFFF"] as const,
-  };
+  // …brand, layout constants, helpers…
+
+  // Product slides
+  for (const p of products) {
+    // 👇 ADD THIS LOG BLOCK HERE
+    console.log("PPT item", {
+      title: p.name || p.product,
+      imageUrl: p.imageUrl || p.image || p.thumbnail,
+      pdfUrl: p.pdfUrl || p.specPdfUrl,
+      hasSpecsArray: Array.isArray((p as any).specs),
+      specsCount: Array.isArray((p as any).specs) ? (p as any).specs.length : 0,
+      specifications: (p as any).specifications?.slice?.(0, 80),
+    });
+
+    const s = pptx.addSlide();
+
+    // …build the slide (left image, right title/sku, specs table, desc, footer bar, etc.)…
+  }
+
+  await pptx.writeFile({ fileName: "Product-Presentation.pptx" } as any);
+}
+
 
   // cover
   {
