@@ -140,9 +140,18 @@ export async function exportSelectionToPptx(products: Product[], client: ClientI
       } as any);
       if (p.pdfUrl || p.specPdfUrl) {
         s.addText(
-          [{ text: "View Specs", options: { hyperlink: { url: String(p.pdfUrl || p.specPdfUrl) }, color: brand.accent, underline: true, fontSize: 16 } }],
-          { x: 5.5, y: 2.7, w: 4.5, h: 0.5, align: "center", fontFace: "Inter", fontSize: 16 } as any
-        );
+  [{
+    text: "View Specs",
+    options: {
+      hyperlink: { url: String(p.pdfUrl || p.specPdfUrl) },
+      color: brand.accent,
+      underline: { style: "heavy" }, // or "dotted" | "dash" | "dbl" | etc.
+      fontSize: 16,
+    }
+  }],
+  { x: 5.5, y: 2.7, w: 4.5, h: 0.5, align: "center", fontFace: "Inter", fontSize: 16 } as any
+);
+
       } else {
         s.addText("Specs", {
           x: 5.5, y: 2.7, w: 4.5, h: 0.5,
