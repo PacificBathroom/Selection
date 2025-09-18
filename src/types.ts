@@ -1,6 +1,43 @@
 // src/types.ts
+export interface Product {
+  // identifiers
+  name?: string;
+  product?: string;
+  code?: string;
+  sku?: string;
+  url?: string;
 
-/** Info entered in the app (not from Sheets) */
+  // media
+  imageUrl?: string;
+  image?: string;
+  thumbnail?: string;
+
+  // copy
+  description?: string;
+
+  // specs
+  specs?: { label?: string; value?: string }[] | string;
+  specifications?: string;
+
+  // pdf/spec sheets
+  pdfUrl?: string;
+  specPdfUrl?: string;
+
+  // category
+  category?: string;
+
+  // per-row contact (optional fallback for slides/UX)
+  contactName?: string;
+  contactEmail?: string;
+  contactPhone?: string;
+  contactAddress?: string;
+
+  // selection flag (if you use it)
+  selected?: boolean;
+
+  [key: string]: any; // keep flexible
+}
+
 export interface ClientInfo {
   projectName?: string;
   clientName?: string;
@@ -9,58 +46,5 @@ export interface ClientInfo {
   contactName?: string;
   contactEmail?: string;
   contactPhone?: string;
+  contactAddress?: string;
 }
-
-/**
- * Product row as used across the app. Keep superset of fields the UI/export
- * may reference to avoid TS errors when some data is missing.
- */
-export interface Product {
-  // Names / identifiers
-  name?: string;          // generic name
-  product?: string;       // legacy alias many components use
-  code?: string;          // generic code
-  sku?: string;           // common alias
-
-  // Categorization
-  category?: string;
-  brand?: string;
-
-  // Display
-  description?: string;
-  features?: string[];    // bullet points
-
-  // Media
-  image?: string;         // direct URL
-  imageUrl?: string;      // alias
-  thumbnail?: string;     // alias for small image
-  pdfUrl?: string;        // brochure/spec pdf
-  specPdfUrl?: string;    // alias
-
-  // Specs (structured or raw text)
-  specs?: Array<{ label?: string; value?: string }> | string;
-  specifications?: string;
-
-  // Pricing
-  price?: string | number;
-
-  // Flexible extra keys from the sheet
-  [key: string]: any;
-}
-
-/** Logical grouping */
-export interface Section {
-  title?: string;
-  products?: Product[];
-  /** legacy single product alias */
-  product?: Product;
-}
-
-/** Asset placeholder */
-export interface Asset {
-  url: string;
-  type?: string;
-}
-
-// convenient re-export
-export type { ClientInfo as default };
