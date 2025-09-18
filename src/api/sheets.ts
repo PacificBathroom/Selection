@@ -1,6 +1,7 @@
 // src/api/sheets.ts
-import type { Product } from "../types";
+import type { Product } from "@/types";
 
+/** Public shape the rest of the app uses */
 export type ProductRow = Product;
 
 export interface ProductFilter {
@@ -10,84 +11,72 @@ export interface ProductFilter {
   range?: string;
 }
 
-let __productsCache: Product[] | null = null;
-
-/* ---------- helpers ---------- */
-const norm = (s: unknown) =>
+/* ----------------- small utils ----------------- */
+const norm = (s: unknown): string =>
   String(s ?? "")
     .trim()
     .toLowerCase()
     .replace(/\s+/g, "") // remove spaces
     .replace(/[()]/g, ""); // drop parens
 
-// Candidate header keys (normalized)
-const H = {
+// Canonical header aliases (normalize before comparing)
+const ALIAS = {
   NAME: ["name", "product", "title"],
   IMAGE: ["imageurl", "image", "thumbnail"],
   DESC: ["description", "desc"],
-  PDF:  ["pdfurl", "pdf", "specpdfurl", "specifications"],
+  PDF: ["pdfurl", "pdf", "specpdfurl", "specifications", "specsheet"],
   CODE: ["code", "product_code", "sku"],
-  CAT:  ["category", "cat"],
+  CATEGORY: ["category", "type"],
 } as const;
 
-function pickByHeader(
-  row: Record<string, unknown>,
-  cands: readonly string[]
-): unknown {
-  // Map: normalized original header -> original header
-  const headerKeys = Object.keys(row);
-  const byNorm = new Map<string, string>();
-  for (const key of headerKeys) byNorm.set(norm(key), key);
+let cache: ProductRow[] | null = null;
 
-  // Try each candidate; return first existing value
-  for (const cand of cands) {
-    const origKey = byNorm.get(norm(cand));
-    if (origKey && origKey in row) return row[origKey];
+/* Pick value from a row using alias list */
+function pickByAliases(
+  row: Record<string, unknown>,
+  aliases: readonly string[]
+): unknown {
+  // Build a normalized lookup once per row call
+  const normalized: Record<string, unknown> = {};
+  for (const k of Object.keys(row)) {
+    normalized[norm(k)] = row[k];
+  }
+
+  for (const a of aliases) {
+    const key = norm(a);
+    if (Object.prototype.hasOwnProperty.call(normalized, key)) {
+      return normalized[key];
+    }
   }
   return undefined;
 }
 
-function toProduct(row: Record<string, any>): Product {
-  return {
-    name: String(pickByHeader(row, H.NAME) ?? ""),
-    description: String(pickByHeader(row, H.DESC) ?? ""),
-    image: String(pickByHeader(row, H.IMAGE) ?? ""),
-    imageUrl: String(pickByHeader(row, H.IMAGE) ?? ""),
-    pdfUrl: String(pickByHeader(row, H.PDF) ?? ""),
-    specPdfUrl: String(pickByHeader(row, H.PDF) ?? ""),
-    code: String(pickByHeader(row, H.CODE) ?? ""),
-    category: row["Category"] ?? ""
- 
-  // provide common aliases so existing components are happy
-  const nameStr = name ? String(name) : undefined;
-  const imageStr = image ? String(image) : undefined;
-  const pdfStr = pdf ? String(pdf) : undefined;
-  const codeStr = code ? String(code) : undefined;
-  const catStr = category ? String(category) : undefined;
+/** Convert a raw object row to our ProductRow */
+function toProduct(row: Record<string, unknown>): ProductRow {
+  const name = pickByAliases(row, ALIAS.NAME);
+  const image = pickByAliases(row, ALIAS.IMAGE);
+  const desc = pickByAliases(row, ALIAS.DESC);
+  const pdf = pickByAliases(row, ALIAS.PDF);
+  const code = pickByAliases(row, ALIAS.CODE);
+  const category = pickByAliases(row, ALIAS.CATEGORY);
 
-  const p: Product = {
-    // canonical
-    name: nameStr,
-    description: description ? String(description) : undefined,
-    image: imageStr,
-    imageUrl: imageStr,
-    pdfUrl: pdfStr,
-    specPdfUrl: pdfStr,
-    code: codeStr,
-    category: catStr,
-
-    // legacy/aliases used in some components
-    product: nameStr,
-    thumbnail: imageStr,
-    sku: codeStr,
+  const p: ProductRow = {
+    name: name ? String(name) : undefined,
+    description: desc ? String(desc) : undefined,
+    image: image ? String(image) : undefined,
+    imageUrl: image ? String(image) : undefined,
+    pdfUrl: pdf ? String(pdf) : undefined,
+    specPdfUrl: pdf ? String(pdf) : undefined,
+    code: code ? String(code) : undefined,
+    category: category ? String(category) : undefined,
   };
 
   return p;
 }
 
-/* ---------- workbook loader with header detection ---------- */
-async function loadAllProducts(range?: string): Promise<Product[]> {
-  if (__productsCache && !range) return __productsCache;
+/* ----------------- workbook loader ----------------- */
+async function loadAllProducts(range?: string): Promise<ProductRow[]> {
+  if (cache && !range) return cache;
 
   const XLSX = await import("xlsx");
   const res = await fetch("/assets/precero.xlsx", { cache: "no-cache" });
@@ -111,59 +100,65 @@ async function loadAllProducts(range?: string): Promise<Product[]> {
       sheetName = range;
     }
   }
+
   if (!sheetName) {
-    sheetName =
-      wb.SheetNames.find((n) => n.toLowerCase() === "products") ||
-      wb.SheetNames[0];
+    // Prefer a sheet actually named "Products"
+    const preferred = wb.SheetNames.find((n) => n.toLowerCase() === "products");
+    sheetName = preferred || wb.SheetNames[0];
   }
 
   const ws = wb.Sheets[sheetName];
   if (!ws) throw new Error(`Sheet "${sheetName}" not found`);
 
-  // Read as matrix to auto-find header row (one that contains "name")
+  // Read matrix for header detection (find a row that contains "name")
   const matrix = XLSX.utils.sheet_to_json<any[]>(ws, {
     header: 1,
-    defval: "",
     blankrows: false,
+    defval: "",
     ...(a1 ? { range: a1 } : {}),
-  }) as unknown as any[][];
+  }) as any[][];
 
   if (!Array.isArray(matrix) || matrix.length === 0) return [];
 
   let headerRowIdx = -1;
   for (let i = 0; i < Math.min(matrix.length, 50); i++) {
     const row = matrix[i] || [];
-    if (row.some((cell) => norm(cell) === "name")) {
+    if (row.some((cell: unknown) => norm(cell) === "name")) {
       headerRowIdx = i;
       break;
     }
   }
   if (headerRowIdx === -1) headerRowIdx = 0;
 
-  const headers = (matrix[headerRowIdx] || []).map((h) => String(h ?? ""));
-  const dataRows = matrix.slice(headerRowIdx + 1);
+  const headers: string[] = (matrix[headerRowIdx] || []).map((h) =>
+    String(h ?? "")
+  );
+  const dataRows: any[][] = matrix.slice(headerRowIdx + 1);
 
+  // Build objects safely (guard against undefined header indices)
   const objects: Record<string, unknown>[] = dataRows.map((arr) => {
     const obj: Record<string, unknown> = {};
     headers.forEach((h, i) => {
-      // guard against out-of-bounds
-      obj[h] = i < arr.length ? arr[i] : "";
+      // only assign if the index exists in the row
+      if (i in arr) obj[h] = arr[i];
     });
     return obj;
   });
 
   const products = objects
     .map(toProduct)
-    .filter((p) => p.name || p.description || p.imageUrl || p.pdfUrl);
+    .filter(
+      (p) => p.name || p.description || p.imageUrl || p.pdfUrl
+    );
 
-  if (!range) __productsCache = products;
+  if (!range) cache = products;
   return products;
 }
 
-/* ---------- public API ---------- */
+/* ----------------- public API ----------------- */
 export async function fetchProducts(
   params: ProductFilter = {}
-): Promise<Product[]> {
+): Promise<ProductRow[]> {
   const { q, category, range } = params;
   let items = await loadAllProducts(range);
 
@@ -177,7 +172,7 @@ export async function fetchProducts(
   if (q && q.trim()) {
     const needle = q.trim().toLowerCase();
     items = items.filter((p) => {
-      const hay = [p.name, p.description, p.pdfUrl, p.imageUrl, p.code]
+      const hay = [p.name, p.description, p.pdfUrl, p.imageUrl, p.code, p.category]
         .filter(Boolean)
         .join(" ")
         .toLowerCase();
