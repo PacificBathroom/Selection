@@ -1,9 +1,10 @@
 // src/types.ts
 export interface Section {
   id?: string;
-  title: string;
-  products: Product[]; // the products that belong in this section
+  title: string;        // required
+  products: Product[];  // required
 }
+
 // sections group products for UI/decks
 export interface Section {
   id?: string;
