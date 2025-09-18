@@ -12,60 +12,66 @@ export interface ProductFilter {
 
 let __productsCache: Product[] | null = null;
 
-/* ---------- helpers ---------- */
-const norm = (s: unknown) =>
-  String(s ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, "") // remove spaces
-    .replace(/[()]/g, ""); // drop parens
+/* ---------- header-aware helpers for your exact columns ---------- */
+function val(row: Record<string, unknown>, key: string): unknown | undefined {
+  const v = (row as any)[key];
+  if (v === undefined || v === null) return undefined;
+  const s = String(v).trim();
+  return s === "" ? undefined : v;
+}
 
-// Canonical header keys (normalized, readonly tuples OK)
-const H = {
-  NAME: ["name", "product", "title"] as const,
-  IMAGE: ["imageurl", "image", "thumbnail", "imgurl", "picture", "photo"] as const,
-  DESC: ["description", "desc", "details"] as const,
-  PDF: ["pdfurl", "pdf", "specpdfurl", "specifications", "specsurl"] as const,
-  CODE: ["code", "product_code", "sku", "partnumber", "itemcode"] as const,
-  CATEGORY: ["category", "group", "type"] as const,
-  PRICE: ["price", "cost", "rrp", "msrp"] as const,
-  SPECS_TEXT: ["specs", "specifications", "techspecs"] as const,
-} as const;
-
-/**
- * Pick the first non-empty field from a row whose header matches any of the
- * provided names (case/space/paren-insensitive).
- */
-function pickByHeader(
-  row: Record<string, unknown>,
-  candidates: readonly string[]
-): unknown {
-  // Build a normalized view of row keys once
-  const byNormKey: Record<string, string> = {};
-  for (const k of Object.keys(row)) {
-    byNormKey[norm(k)] = k;
+function boolish(v: unknown): boolean | undefined {
+  if (v === true) return true;
+  if (typeof v === "string") {
+    const s = v.trim().toLowerCase();
+    if (["true", "yes", "y", "1"].includes(s)) return true;
+    if (["false", "no", "n", "0"].includes(s)) return false;
   }
-  for (const c of candidates) {
-    const key = byNormKey[norm(c)];
-    if (key !== undefined) {
-      const v = (row as any)[key];
-      if (v !== undefined && v !== null && String(v).trim() !== "") {
-        return v;
-      }
-    }
-  }
+  if (typeof v === "number") return v !== 0;
   return undefined;
 }
 
-function toProduct(row: Record<string, unknown>): Product {
-  const name = pickByHeader(row, H.NAME);
-  const img = pickByHeader(row, H.IMAGE);
-  const desc = pickByHeader(row, H.DESC);
-  const pdf = pickByHeader(row, H.PDF);
-  const code = pickByHeader(row, H.CODE);
-  const cat = pickByHeader(row, H.CATEGORY);
-  const price = pickByHeader(row, H.PRICE);
-  const specs = pickByHeader(row, H.SPECS_TEXT);
+// Parse "SpecsBullets" like:
+//   "WELS 4 Star: 6L/min | Brass Body | Finish - Chrome"
+// → [{label: "WELS 4 Star", value:"6L/min"}, {value:"Brass Body"}, {label:"Finish", value:"Chrome"}]
+function parseSpecsBullets(v: unknown): { label?: string; value?: string }[] | undefined {
+  if (typeof v !== "string") return undefined;
+  const pieces = v.split("|").map((s) => s.trim()).filter(Boolean);
+  if (!pieces.length) return undefined;
+  const out = pieces.map((item) => {
+    const hasColon = item.includes(":");
+    if (hasColon) {
+      const [label, ...rest] = item.split(":");
+      return { label: label.trim() || undefined, value: rest.join(":").trim() || undefined };
+    }
+    // allow "Label - Value" too
+    const dash = item.indexOf(" - ");
+    if (dash > 0) {
+      return { label: item.slice(0, dash).trim() || undefined, value: item.slice(dash + 3).trim() || undefined };
+    }
+    return { value: item };
+  });
+  return out;
+}
+
+function toProductFromExactHeaders(row: Record<string, unknown>): Product {
+  const selected      = boolish(val(row, "Select"));
+  const url           = val(row, "Url");
+  const code          = val(row, "Code");
+  const name          = val(row, "Name");
+  const imageURL      = val(row, "ImageURL");
+  const description   = val(row, "Description");
+  const specsBullets  = val(row, "SpecsBullets");
+  const pdfURL        = val(row, "PdfURL");
+  const contactName   = val(row, "ContactName");
+  const contactEmail  = val(row, "ContactEmail");
+  const contactPhone  = val(row, "ContactPhone");
+  const contactAddr   = val(row, "ContactAddress");
+  const category      = val(row, "Category");
+
+  // Normalize specs based on your "SpecsBullets" column
+  const specsParsed = parseSpecsBullets(specsBullets);
+  const specifications = typeof specsBullets === "string" ? specsBullets : undefined;
 
   const productName = name ? String(name) : undefined;
 
@@ -73,132 +79,63 @@ function toProduct(row: Record<string, unknown>): Product {
     // names / ids
     name: productName,
     product: productName,
-    sku: code ? String(code) : undefined,
     code: code ? String(code) : undefined,
-
-    // categorization
-    category: cat ? String(cat) : undefined,
-
-    // display
-    description: desc ? String(desc) : undefined,
+    sku: code ? String(code) : undefined,
+    url: url ? String(url) : undefined,
 
     // media
-    image: img ? String(img) : undefined,
-    imageUrl: img ? String(img) : undefined,
-    thumbnail: img ? String(img) : undefined,
-    pdfUrl: pdf ? String(pdf) : undefined,
-    specPdfUrl: pdf ? String(pdf) : undefined,
+    imageUrl: imageURL ? String(imageURL) : undefined,
+    image: imageURL ? String(imageURL) : undefined,
+    thumbnail: imageURL ? String(imageURL) : undefined,
 
-    // price
-    price:
-      typeof price === "number" ? price : price != null ? String(price) : undefined,
+    // copy
+    description: description ? String(description) : undefined,
 
     // specs
-    ...(typeof specs === "string"
-      ? (() => {
-          const s = specs.trim();
-          if (s.startsWith("[") && s.endsWith("]")) {
-            try {
-              const parsed = JSON.parse(s);
-              if (Array.isArray(parsed)) {
-                return { specs: parsed };
-              }
-            } catch {
-              /* ignore JSON parse errors; fall through */
-            }
-          }
-          return { specifications: s, specs: s };
-        })()
-      : specs != null
-      ? { specs }
-      : {}),
+    ...(specsParsed ? { specs: specsParsed } : {}),
+    ...(specifications ? { specifications } : {}),
+
+    // pdf/spec sheets
+    pdfUrl: pdfURL ? String(pdfURL) : undefined,
+    specPdfUrl: pdfURL ? String(pdfURL) : undefined,
+
+    // category
+    category: category ? String(category) : undefined,
+
+    // contacts
+    contactName: contactName ? String(contactName) : undefined,
+    contactEmail: contactEmail ? String(contactEmail) : undefined,
+    contactPhone: contactPhone ? String(contactPhone) : undefined,
+    contactAddress: contactAddr ? String(contactAddr) : undefined,
+
+    // selection
+    selected: selected,
   };
 }
 
-/* ---------- workbook loader with header detection ---------- */
+/* ---------- Google Sheets-backed loader ---------- */
 async function loadAllProducts(range?: string): Promise<Product[]> {
   if (__productsCache && !range) return __productsCache;
+  const qs = range ? `?range=${encodeURIComponent(range)}` : "";
+  const res = await fetch(`/api/sheets${qs}`, { cache: "no-cache" });
+  if (!res.ok) throw new Error(`Sheets API error ${res.status}`);
+  const rows = (await res.json()) as Record<string, unknown>[];
 
-  // ESM/CJS-safe dynamic import for Netlify
-  const XLSXns: any = await import("xlsx");
-  const XLSX = XLSXns.default ?? XLSXns;
-
-  const res = await fetch("/assets/precero.xlsx", { cache: "no-cache" });
-  if (!res.ok) throw new Error(`Failed to fetch Excel: ${res.status}`);
-
-  const buf = await res.arrayBuffer();
-  const wb = XLSX.read(buf, { type: "array" });
-
-  // Resolve sheet + optional A1 range
-  let sheetName: string | undefined;
-  let a1: string | undefined;
-
-  if (range) {
-    if (range.includes("!")) {
-      const [sn, r] = range.split("!");
-      sheetName = sn || undefined;
-      a1 = r || undefined;
-    } else if (/^[A-Z]+(?:\d+)?:[A-Z]+(?:\d+)?$/i.test(range)) {
-      a1 = range;
-    } else {
-      sheetName = range;
-    }
-  }
-
-  if (!sheetName) {
-    sheetName =
-      wb.SheetNames.find((n: string) => n.toLowerCase() === "products") ??
-      wb.SheetNames[0];
-  }
-
-  const ws = wb.Sheets[sheetName];
-  if (!ws) throw new Error(`Sheet "${sheetName}" not found`);
-
-  // Read as matrix to auto-find header row (one that contains a NAME-like column)
-  const matrix = XLSX.utils.sheet_to_json<any[]>(ws, {
-    header: 1,
-    defval: "",
-    blankrows: false,
-    ...(a1 ? { range: a1 } : {}),
-  }) as any[][];
-
-  if (!Array.isArray(matrix) || matrix.length === 0) return [];
-
-  // detect header row by presence of a name-ish column
-  let headerRowIdx = -1;
-  const nameKeys = new Set(H.NAME.map((s) => norm(s)));
-  for (let i = 0; i < Math.min(matrix.length, 50); i++) {
-    const r = matrix[i] || [];
-    const hasNameLike = r.some((cell) => nameKeys.has(norm(cell)));
-    if (hasNameLike) {
-      headerRowIdx = i;
-      break;
-    }
-  }
-  if (headerRowIdx === -1) headerRowIdx = 0;
-
-  const headers = (matrix[headerRowIdx] || []).map((h) => String(h ?? ""));
-  const dataRows = matrix.slice(headerRowIdx + 1);
-
-  const objects: Record<string, unknown>[] = dataRows.map((arr) => {
-    const obj: Record<string, unknown> = {};
-    headers.forEach((h, i) => {
-      obj[h] = arr[i];
-    });
-    return obj;
-  });
-
-  const products = objects
-    .map(toProduct)
-    .filter(
-      (p) => p.product || p.name || p.description || p.imageUrl || p.pdfUrl
-    );
+  const products = rows
+    .map(toProductFromExactHeaders)
+    .filter((p) => p.product || p.name || p.description || p.imageUrl || p.pdfUrl);
 
   if (!range) __productsCache = products;
   return products;
 }
 
 /* ---------- public API ---------- */
+export interface ProductFilter {
+  q?: string;
+  category?: string;
+  range?: string;
+}
+
 export async function fetchProducts(params: ProductFilter = {}): Promise<Product[]> {
   const { q, category, range } = params;
   let items = await loadAllProducts(range);
@@ -214,8 +151,9 @@ export async function fetchProducts(params: ProductFilter = {}): Promise<Product
       const hay = [
         p.product,
         p.name,
-        p.sku,
         p.code,
+        p.sku,
+        p.url,
         p.category,
         p.description,
         p.pdfUrl,
