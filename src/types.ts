@@ -4,6 +4,12 @@ export interface Section {
   title: string;
   products: Product[]; // the products that belong in this section
 }
+// sections group products for UI/decks
+export interface Section {
+  id?: string;
+  title: string;
+  products: Product[];
+}
 
 export interface Product {
   // identifiers
