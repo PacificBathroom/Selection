@@ -60,7 +60,7 @@ Make sure the file exists in /public/assets/precero.xlsx and is deployed correct
     }
     if (headerRowIdx === -1) headerRowIdx = 0;
 
-    const headers = (matrix[headerRowIdx] || []).map((h) => String(h ?? ""));
+    const headers = (matrix[headerRowIdx] || []).map((h: any) => String(h ?? ""));
     const dataRows = matrix.slice(headerRowIdx + 1);
 
     const objects: Record<string, any>[] = dataRows.map((arr) => {
