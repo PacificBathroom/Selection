@@ -3,9 +3,7 @@ import type { Handler } from "@netlify/functions";
 export const handler: Handler = async (event) => {
   try {
     const url = event.queryStringParameters?.url || "";
-    if (!url) {
-      return { statusCode: 400, body: "Missing ?url=" };
-    }
+    if (!url) return { statusCode: 400, body: "Missing ?url=" };
 
     const upstream = await fetch(url, { redirect: "follow" });
     if (!upstream.ok) {
