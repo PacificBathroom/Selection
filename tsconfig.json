@@ -6,6 +6,8 @@
     "moduleResolution": "Bundler",
     "jsx": "react-jsx",
     "strict": true,
+    "composite": true,
+    "types": ["node"]
     "skipLibCheck": true,
 
     "baseUrl": ".",
@@ -17,4 +19,9 @@
   },
   "include": ["src", "env.d.ts"],
   "exclude": ["node_modules", "dist"]
+
+},
+  "references": [{ "path": "./tsconfig.node.json" }]
+}
+
 }
