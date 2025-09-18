@@ -1,4 +1,10 @@
 // src/types.ts
+export interface Section {
+  id?: string;
+  title: string;
+  products: Product[]; // the products that belong in this section
+}
+
 export interface Product {
   // identifiers
   name?: string;
