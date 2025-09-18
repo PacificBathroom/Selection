@@ -147,7 +147,9 @@ export async function exportDeckFromProducts({
       w: SLIDE_W - 1.6,
       h: 0.8,
       fontSize: 28,
-      bold: true,
+      // ❌ border: true
+border: { style: "solid", color: "000000", pt: 1 }  // or just remove border entirely
+,
     });
     tx(s, client.contactName || "", {
       x: 0.8,
