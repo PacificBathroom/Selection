@@ -86,7 +86,27 @@ function toSpecPairs(p: Product): Array<[string, string]> {
 }
 
 export async function exportSelectionToPptx(products: Product[], client: ClientInfo) {
-  const pptx = new PptxGenJS();
+  for (const p of products) {
+  const s = pptx.addSlide();
+  const title  = p.name || p.product || "Untitled Product";
+  const code   = p.code || p.sku || "";
+  const url    = (p as any).url || p.pdfUrl || p.specPdfUrl;
+  const imgUrl = p.imageUrl || p.image || p.thumbnail;
+
+  console.log("PPT item", {
+    title,
+    imageUrl: imgUrl,
+    pdfUrl: p.pdfUrl || p.specPdfUrl,
+    hasSpecsArray: Array.isArray((p as any).specs),
+    specsCount: Array.isArray((p as any).specs) ? (p as any).specs.length : 0,
+    specifications: typeof (p as any).specifications === "string"
+      ? (p as any).specifications.slice(0, 80)
+      : undefined,
+  });
+
+  // …then do addImage/addText/etc
+}
+const pptx = new PptxGenJS();
   pptx.title = client.projectName || "Product Presentation";
   pptx.layout = "LAYOUT_16x9";
 
