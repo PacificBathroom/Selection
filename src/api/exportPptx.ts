@@ -59,11 +59,11 @@ export async function exportSelectionToPptx(
       { x: 0.5, y: 4, w: 8.5, h: 0.6 }
     );
 
-    // Description (autosize by setting fit = true)
+    // Description (autosize by setting fit = shrink)
     if (product.description) {
       slide.addText(
         [{ text: product.description, options: { fontSize: 14 } }],
-        { x: 0.5, y: 4.8, w: 8.5, h: 2, fit: true }
+        { x: 0.5, y: 4.8, w: 8.5, h: 2, fit: shrink }
       );
     }
 
