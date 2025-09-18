@@ -1,25 +1,24 @@
 // src/components/SectionSlide.tsx
 import React, { useEffect, useMemo, useState } from "react";
-import type { Section } from "../types";
-import { fetchProducts, type ProductRow } from "../api/sheets";
+import type { Section, Product } from "../types";
+import { fetchProducts } from "../api/sheets";
 
 type Props = {
   section: Section;
-  onSelectProduct?: (p: ProductRow) => void;
-  onUpdate?: (next: Section) => void;
+  onSelectProduct?: (p: Product) => void;
 };
 
 export default function SectionSlide({ section, onSelectProduct }: Props) {
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("");
-  const [items, setItems] = useState<ProductRow[]>([]);
+  const [items, setItems] = useState<Product[]>([]);
 
   useEffect(() => {
     fetchProducts({ q: search, category }).then(setItems).catch(console.error);
   }, [search, category]);
 
   const categories = useMemo(() => {
-    const s = new Set(items.map((i) => (i.category || "").toString().trim()).filter(Boolean));
+    const s = new Set((items || []).map((i) => (i.category || "").trim()).filter(Boolean));
     return Array.from(s).sort((a, b) => a.localeCompare(b));
   }, [items]);
 
@@ -32,7 +31,7 @@ export default function SectionSlide({ section, onSelectProduct }: Props) {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search products, code, description…"
+            placeholder="Search name, code, description…"
             className="border rounded-lg px-3 py-2 text-sm w-64"
           />
           <select
@@ -54,55 +53,35 @@ export default function SectionSlide({ section, onSelectProduct }: Props) {
         <p className="text-sm text-slate-500">No products found.</p>
       ) : (
         <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {items.map((p, i) => {
-            const title = p.name ?? p.product?.name ?? "Untitled";
-            const thumb = p.thumbnail ?? p.imageUrl ?? p.image;
-            const sku = p.sku ? String(p.sku) : p.code ? String(p.code) : "";
+          {items.map((p, i) => (
+            <li key={`${p.code || p.name || i}`} className="border rounded-2xl p-3 flex gap-3 hover:shadow">
+              {p.imageUrl ? (
+                <img
+                  src={String(p.imageUrl)}
+                  alt={String(p.name || "Product")}
+                  className="w-24 h-24 object-cover rounded-xl"
+                  loading="lazy"
+                />
+              ) : (
+                <div className="w-24 h-24 bg-slate-100 rounded-xl" />
+              )}
 
-            const priceText =
-              p.price != null && String(p.price).trim() !== ""
-                ? typeof p.price === "number"
-                  ? `$${p.price.toFixed(2)}`
-                  : String(p.price)
-                : "";
+              <div className="flex-1">
+                <div className="font-medium">{p.name || "Untitled"}</div>
+                {p.code ? <div className="text-xs text-slate-500">Code: {p.code}</div> : null}
+                {p.category ? <div className="text-xs text-slate-500">Category: {p.category}</div> : null}
 
-            return (
-              <li
-                key={String(p.sku ?? p.code ?? p.name ?? i)}
-                className="border rounded-2xl p-3 flex gap-3 hover:shadow"
-              >
-                {thumb ? (
-                  <img
-                    src={String(thumb)}
-                    alt={title}
-                    className="w-24 h-24 object-cover rounded-xl"
-                    loading="lazy"
-                  />
-                ) : (
-                  <div className="w-24 h-24 bg-slate-100 rounded-xl" />
-                )}
-
-                <div className="flex-1 min-w-0">
-                  <div className="font-medium truncate">{title}</div>
-                  <div className="text-xs text-slate-500 space-x-2">
-                    {sku && <span>SKU/Code: {sku}</span>}
-                    {p.category && <span>Category: {p.category}</span>}
-                  </div>
-
-                  {priceText && <div className="mt-1 font-semibold">{priceText}</div>}
-
-                  {onSelectProduct ? (
-                    <button
-                      className="mt-2 text-sm px-3 py-1 rounded-lg border hover:bg-slate-50"
-                      onClick={() => onSelectProduct(p)}
-                    >
-                      Add to {section.title}
-                    </button>
-                  ) : null}
-                </div>
-              </li>
-            );
-          })}
+                {onSelectProduct ? (
+                  <button
+                    className="mt-2 text-sm px-3 py-1 rounded-lg border hover:bg-slate-50"
+                    onClick={() => onSelectProduct(p)}
+                  >
+                    Add to {section.title}
+                  </button>
+                ) : null}
+              </div>
+            </li>
+          ))}
         </ul>
       )}
     </section>
