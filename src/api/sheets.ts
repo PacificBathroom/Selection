@@ -22,15 +22,23 @@ const norm = (s: unknown) =>
 
 // Canonical header keys (normalized)
 const HEADER_KEYS = {
-  NAME: ["name", "product", "title"],
-  IMAGE: ["imageurl", "image", "thumbnail", "imgurl", "picture", "photo"],
-  DESC: ["description", "desc", "details"],
-  PDF: ["pdfurl", "pdf", "specpdfurl", "specifications", "specsurl"],
-  CODE: ["code", "product_code", "sku", "partnumber", "itemcode"],
-} as const;
+  NAME: ["name", "product", "title"] as const,
+  IMAGE: ["imageurl", "image", "thumbnail", "imgurl", "picture", "photo"] as const,
+  DESC: ["description", "desc", "details"] as const,
+  PDF: ["pdfurl", "pdf", "specpdfurl", "specifications", "specsurl"] as const,
+  CODE: ["code", "product_code", "sku", "partnumber", "itemcode"] as const,
+};
+
+const ALL_KEYS: string[] = [
+  ...HEADER_KEYS.NAME,
+  ...HEADER_KEYS.IMAGE,
+  ...HEADER_KEYS.DESC,
+  ...HEADER_KEYS.PDF,
+  ...HEADER_KEYS.CODE,
+].map((s) => String(s));
 
 // pick value from a raw row by matching header variants
-function pickByHeader(row: Record<string, any>, candidates: string[]) {
+function pickByHeader(row: Record<string, any>, candidates: readonly string[]) {
   for (const key of Object.keys(row)) {
     const nk = norm(key);
     if (candidates.some((c) => c === nk)) {
@@ -69,15 +77,7 @@ function toProduct(row: Record<string, any>): Product {
     const v = row[k];
     if (v === "" || v == null) continue;
     const nk = norm(k);
-    if (
-      ![
-        ...HEADER_KEYS.NAME,
-        ...HEADER_KEYS.IMAGE,
-        ...HEADER_KEYS.DESC,
-        ...HEADER_KEYS.PDF,
-        ...HEADER_KEYS.CODE,
-      ].includes(nk)
-    ) {
+    if (!ALL_KEYS.includes(nk)) {
       p[k] = v;
     }
   }
@@ -113,7 +113,7 @@ async function loadAllProducts(range?: string): Promise<Product[]> {
   }
   if (!sheetName) {
     sheetName =
-      wb.SheetNames.find((n) => n.toLowerCase() === "products") ||
+      wb.SheetNames.find((n: string) => n.toLowerCase() === "products") ||
       wb.SheetNames[0];
   }
 
@@ -140,12 +140,10 @@ async function loadAllProducts(range?: string): Promise<Product[]> {
   }
   if (headerRowIdx === -1) headerRowIdx = 0;
 
-  const headers: string[] = (matrix[headerRowIdx] || []).map((h) =>
-    String(h ?? "")
-  );
+  const headers: string[] = (matrix[headerRowIdx] || []).map((h) => String(h ?? ""));
   const dataRows = matrix.slice(headerRowIdx + 1);
 
-  // Build objects safely (skip undefined header keys)
+  // Build objects safely (skip undefined/blank header keys)
   const objects: Record<string, any>[] = dataRows.map((arr) => {
     const obj: Record<string, any> = {};
     headers.forEach((h, i) => {
@@ -173,9 +171,7 @@ export async function fetchProducts(
 
   if (category && category.trim()) {
     const needle = category.trim().toLowerCase();
-    items = items.filter(
-      (p) => (p.category ?? "").toLowerCase() === needle
-    );
+    items = items.filter((p) => (p.category ?? "").toLowerCase() === needle);
   }
 
   if (q && q.trim()) {
