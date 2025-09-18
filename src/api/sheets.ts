@@ -17,18 +17,18 @@ const norm = (s: unknown) =>
   String(s ?? "")
     .trim()
     .toLowerCase()
-    .replace(/\s+/g, "")     // remove spaces
-    .replace(/[()]/g, "");   // drop parens
+    .replace(/\s+/g, "") // remove spaces
+    .replace(/[()]/g, ""); // drop parens
 
 // Canonical header keys (normalized, readonly tuples OK)
 const H = {
-  NAME:       ["name", "product", "title"] as const,
-  IMAGE:      ["imageurl", "image", "thumbnail", "imgurl", "picture", "photo"] as const,
-  DESC:       ["description", "desc", "details"] as const,
-  PDF:        ["pdfurl", "pdf", "specpdfurl", "specifications", "specsurl"] as const,
-  CODE:       ["code", "product_code", "sku", "partnumber", "itemcode"] as const,
-  CATEGORY:   ["category", "group", "type"] as const,
-  PRICE:      ["price", "cost", "rrp", "msrp"] as const,
+  NAME: ["name", "product", "title"] as const,
+  IMAGE: ["imageurl", "image", "thumbnail", "imgurl", "picture", "photo"] as const,
+  DESC: ["description", "desc", "details"] as const,
+  PDF: ["pdfurl", "pdf", "specpdfurl", "specifications", "specsurl"] as const,
+  CODE: ["code", "product_code", "sku", "partnumber", "itemcode"] as const,
+  CATEGORY: ["category", "group", "type"] as const,
+  PRICE: ["price", "cost", "rrp", "msrp"] as const,
   SPECS_TEXT: ["specs", "specifications", "techspecs"] as const,
 } as const;
 
@@ -37,9 +37,9 @@ const H = {
  * provided names (case/space/paren-insensitive).
  */
 function pickByHeader(
-  row: Record<string, any>,
+  row: Record<string, unknown>,
   candidates: readonly string[]
-): any {
+): unknown {
   // Build a normalized view of row keys once
   const byNormKey: Record<string, string> = {};
   for (const k of Object.keys(row)) {
@@ -48,7 +48,7 @@ function pickByHeader(
   for (const c of candidates) {
     const key = byNormKey[norm(c)];
     if (key !== undefined) {
-      const v = row[key];
+      const v = (row as any)[key];
       if (v !== undefined && v !== null && String(v).trim() !== "") {
         return v;
       }
@@ -57,15 +57,15 @@ function pickByHeader(
   return undefined;
 }
 
-function toProduct(row: Record<string, any>): Product {
+function toProduct(row: Record<string, unknown>): Product {
   const name = pickByHeader(row, H.NAME);
-  const img  = pickByHeader(row, H.IMAGE);
+  const img = pickByHeader(row, H.IMAGE);
   const desc = pickByHeader(row, H.DESC);
-  const pdf  = pickByHeader(row, H.PDF);
+  const pdf = pickByHeader(row, H.PDF);
   const code = pickByHeader(row, H.CODE);
-  const cat  = pickByHeader(row, H.CATEGORY);
-  const price= pickByHeader(row, H.PRICE);
-  const specs= pickByHeader(row, H.SPECS_TEXT);
+  const cat = pickByHeader(row, H.CATEGORY);
+  const price = pickByHeader(row, H.PRICE);
+  const specs = pickByHeader(row, H.SPECS_TEXT);
 
   const productName = name ? String(name) : undefined;
 
@@ -90,10 +90,10 @@ function toProduct(row: Record<string, any>): Product {
     specPdfUrl: pdf ? String(pdf) : undefined,
 
     // price
-    price: typeof price === "number" ? price : price != null ? String(price) : undefined,
+    price:
+      typeof price === "number" ? price : price != null ? String(price) : undefined,
 
     // specs
-    // if specs looks like JSON array of {label,value}, try to parse safely
     ...(typeof specs === "string"
       ? (() => {
           const s = specs.trim();
@@ -103,7 +103,9 @@ function toProduct(row: Record<string, any>): Product {
               if (Array.isArray(parsed)) {
                 return { specs: parsed };
               }
-            } catch {}
+            } catch {
+              /* ignore JSON parse errors; fall through */
+            }
           }
           return { specifications: s, specs: s };
         })()
@@ -117,15 +119,15 @@ function toProduct(row: Record<string, any>): Product {
 async function loadAllProducts(range?: string): Promise<Product[]> {
   if (__productsCache && !range) return __productsCache;
 
-  // 👇 make ESM/CJS safe
+  // ESM/CJS-safe dynamic import for Netlify
   const XLSXns: any = await import("xlsx");
   const XLSX = XLSXns.default ?? XLSXns;
 
   const res = await fetch("/assets/precero.xlsx", { cache: "no-cache" });
   if (!res.ok) throw new Error(`Failed to fetch Excel: ${res.status}`);
-  // ...
-}
 
+  const buf = await res.arrayBuffer();
+  const wb = XLSX.read(buf, { type: "array" });
 
   // Resolve sheet + optional A1 range
   let sheetName: string | undefined;
@@ -142,9 +144,10 @@ async function loadAllProducts(range?: string): Promise<Product[]> {
       sheetName = range;
     }
   }
+
   if (!sheetName) {
     sheetName =
-      wb.SheetNames.find((n) => n.toLowerCase() === "products") ||
+      wb.SheetNames.find((n: string) => n.toLowerCase() === "products") ??
       wb.SheetNames[0];
   }
 
@@ -165,8 +168,8 @@ async function loadAllProducts(range?: string): Promise<Product[]> {
   let headerRowIdx = -1;
   const nameKeys = new Set(H.NAME.map((s) => norm(s)));
   for (let i = 0; i < Math.min(matrix.length, 50); i++) {
-    const row = matrix[i] || [];
-    const hasNameLike = row.some((cell) => nameKeys.has(norm(cell)));
+    const r = matrix[i] || [];
+    const hasNameLike = r.some((cell) => nameKeys.has(norm(cell)));
     if (hasNameLike) {
       headerRowIdx = i;
       break;
@@ -177,21 +180,18 @@ async function loadAllProducts(range?: string): Promise<Product[]> {
   const headers = (matrix[headerRowIdx] || []).map((h) => String(h ?? ""));
   const dataRows = matrix.slice(headerRowIdx + 1);
 
-  const objects: Record<string, any>[] = dataRows.map((arr) => {
-    const obj: Record<string, any> = {};
-    headers.forEach((h, i) => (obj[h] = arr[i]));
+  const objects: Record<string, unknown>[] = dataRows.map((arr) => {
+    const obj: Record<string, unknown> = {};
+    headers.forEach((h, i) => {
+      obj[h] = arr[i];
+    });
     return obj;
   });
 
   const products = objects
     .map(toProduct)
     .filter(
-      (p) =>
-        p.product ||
-        p.name ||
-        p.description ||
-        p.imageUrl ||
-        p.pdfUrl
+      (p) => p.product || p.name || p.description || p.imageUrl || p.pdfUrl
     );
 
   if (!range) __productsCache = products;
