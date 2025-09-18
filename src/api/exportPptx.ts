@@ -23,4 +23,4 @@ async function fetchAsDataUrl(url?: string): Promise<string | undefined> {
   } catch {
     // final fallback: direct fetch (may fail on CORS; safe to ignore)
     try {
-      const res = await fetch(url!, { mode: "cors"
+      const res = await fetch(url!, { mode: "cors"}
