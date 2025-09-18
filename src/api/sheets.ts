@@ -47,14 +47,17 @@ function pickByHeader(
   return undefined;
 }
 
-function toProduct(row: Record<string, unknown>): Product {
-  const name = pickByHeader(row, H.NAME);
-  const image = pickByHeader(row, H.IMAGE);
-  const description = pickByHeader(row, H.DESC);
-  const pdf = pickByHeader(row, H.PDF);
-  const code = pickByHeader(row, H.CODE);
-  const category = pickByHeader(row, H.CAT);
-
+function toProduct(row: Record<string, any>): Product {
+  return {
+    name: String(pickByHeader(row, H.NAME) ?? ""),
+    description: String(pickByHeader(row, H.DESC) ?? ""),
+    image: String(pickByHeader(row, H.IMAGE) ?? ""),
+    imageUrl: String(pickByHeader(row, H.IMAGE) ?? ""),
+    pdfUrl: String(pickByHeader(row, H.PDF) ?? ""),
+    specPdfUrl: String(pickByHeader(row, H.PDF) ?? ""),
+    code: String(pickByHeader(row, H.CODE) ?? ""),
+    category: row["Category"] ?? ""
+ 
   // provide common aliases so existing components are happy
   const nameStr = name ? String(name) : undefined;
   const imageStr = image ? String(image) : undefined;
