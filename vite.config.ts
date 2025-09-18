@@ -8,7 +8,7 @@ export default defineConfig({
   publicDir: "public", // ensure Excel file gets copied to dist
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "src")
+     "@": fileURLToPath(new URL("./src", import.meta.url))
     }
   },
   build: {
