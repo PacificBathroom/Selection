@@ -38,13 +38,16 @@ type RowObj = Record<string, any>;
 
 function rowArrayToObj(headers: string[], row: any[]): RowObj {
   const obj: RowObj = {};
-  headers.forEach((h, i) => {
-    obj[h] = row[i] ?? "";
-  });
+  for (let i = 0; i < headers.length; i++) {
+    const rawKey = headers[i];
+    const key: string = String(rawKey ?? "").trim();
+    if (key) obj[key] = row[i] ?? "";
+  }
   return obj;
 }
 
 function pickByAliases(raw: RowObj, aliases: string[]): any {
+  // Build normalized lookup once
   const lookup: Record<string, any> = {};
   for (const [k, v] of Object.entries(raw)) {
     const key = norm(k);
@@ -68,7 +71,7 @@ function toProduct(raw: RowObj): Product {
     price:       pickByAliases(raw, HEADER_ALIASES.price),
   };
 
-  // Normalize to strings where applicable
+  // Normalize strings
   if (p.name != null)        p.name = String(p.name);
   if (p.description != null) p.description = String(p.description);
   if (p.imageUrl != null)    p.imageUrl = String(p.imageUrl);
@@ -76,7 +79,7 @@ function toProduct(raw: RowObj): Product {
   if (p.code != null)        p.code = String(p.code);
   if (p.category != null)    p.category = String(p.category);
 
-  // Optional specs (string → bullets)
+  // Optional specs → array of bullets
   const rawSpecs = pickByAliases(raw, HEADER_ALIASES.specs);
   if (Array.isArray(rawSpecs)) {
     p.specs = rawSpecs.map((s) => String(s || "").trim()).filter(Boolean);
@@ -87,7 +90,7 @@ function toProduct(raw: RowObj): Product {
       .filter(Boolean);
   }
 
-  // ---- Back-compat aliases ----
+  // Back-compat aliases for the rest of the app
   p.product = p.name;
   p.sku = p.code;
   p.image = p.imageUrl;
@@ -128,7 +131,7 @@ async function loadAllProducts(range?: string): Promise<Product[]> {
       wb.SheetNames[0];
   }
 
-  const ws = wb.Sheets[sheetName as string];
+  const ws = wb.Sheets[String(sheetName)];
   if (!ws) throw new Error(`Sheet "${sheetName}" not found`);
 
   // Read as matrix so we can auto-find the header row (row containing "Name")
