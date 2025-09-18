@@ -117,12 +117,15 @@ function toProduct(row: Record<string, any>): Product {
 async function loadAllProducts(range?: string): Promise<Product[]> {
   if (__productsCache && !range) return __productsCache;
 
-  const XLSX = await import("xlsx");
+  // 👇 make ESM/CJS safe
+  const XLSXns: any = await import("xlsx");
+  const XLSX = XLSXns.default ?? XLSXns;
+
   const res = await fetch("/assets/precero.xlsx", { cache: "no-cache" });
   if (!res.ok) throw new Error(`Failed to fetch Excel: ${res.status}`);
+  // ...
+}
 
-  const buf = await res.arrayBuffer();
-  const wb = XLSX.read(buf, { type: "array" });
 
   // Resolve sheet + optional A1 range
   let sheetName: string | undefined;
