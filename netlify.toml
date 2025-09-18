@@ -1,17 +1,24 @@
+# netlify.toml
 [build]
-  command = "npm install --no-audit --no-fund --loglevel verbose && npm run build:ci"
+  command = "npm install --no-audit --no-fund --loglevel verbose && npm run build"
   publish = "dist"
+  environment = [
+    "NETLIFY_BUILD_DEBUG",
+    "NODE_VERSION",
+    "NPM_CONFIG_LOGLEVEL",
+    "NPM_CONFIG_OPTIONAL",
+    "ROLLUP_DISABLE_NATIVE"
+  ]
 
 [functions]
-  directory = "netlify/functions"
   node_bundler = "esbuild"
 
 [[redirects]]
   from = "/api/*"
-  to   = "/.netlify/functions/:splat"
+  to = "/.netlify/functions/:splat"
   status = 200
 
 [[redirects]]
   from = "/*"
-  to   = "/index.html"
+  to = "/index.html"
   status = 200
