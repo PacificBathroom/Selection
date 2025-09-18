@@ -1,6 +1,15 @@
 // src/api/exportPptx.ts
 import PptxGenJS from "pptxgenjs";
 import type { Product, ClientInfo } from "../types";
+// BEFORE (likely)
+import workerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs';
+
+// AFTER (Vite: explicit ?url; also use the non-min path)
+import workerSrc from 'pdfjs-dist/build/pdf.worker.mjs?url';
+import * as pdfjsLib from 'pdfjs-dist';
+
+(pdfjsLib as any).GlobalWorkerOptions.workerSrc = workerSrc;
+
 
 async function fetchAsDataUrl(url?: string): Promise<string | undefined> {
   try {
