@@ -1,64 +1,30 @@
 // netlify/functions/pdf-proxy.js
-const fetch = (...args) => import('node-fetch').then(({ default: f }) => f(...args));
-
 exports.handler = async (event) => {
   try {
-    const qs = event.queryStringParameters || {};
-    let url = (qs.url || qs.u || "").trim();
-    if (!url && qs.url_b64) {
-      try { url = Buffer.from(String(qs.url_b64), "base64").toString("utf8").trim(); } catch {}
+    const url = (event.queryStringParameters && event.queryStringParameters.url) || "";
+    if (!url) {
+      return { statusCode: 400, body: "Missing ?url=" };
     }
-    try { url = decodeURIComponent(url); } catch {}
 
-    const debug = String(qs.debug || "") === "1";
-    if (!url || !/^https?:\/\//i.test(url)) return text(400, "Invalid or missing url");
-
-    const r = await fetch(url, {
-      redirect: "follow",
-      headers: { "User-Agent": "Mozilla/5.0 (compatible; PacificBathroomBot/1.0)" }
-    });
-    const ct = r.headers.get("content-type") || "application/octet-stream";
-
-    if (debug) {
-      return json(200, { requestedUrl: url, finalUrl: r.url, status: r.status, ok: r.ok, contentType: ct });
+    const upstream = await fetch(url, { redirect: "follow" });
+    if (!upstream.ok) {
+      return { statusCode: upstream.status, body: `Upstream error: ${upstream.status}` };
     }
-    if (!r.ok) return text(r.status, `Upstream error ${r.status} for ${r.url}`);
 
-    const buf = await r.arrayBuffer();
+    const arrayBuf = await upstream.arrayBuffer();
+    const contentType = upstream.headers.get("content-type") || "application/octet-stream";
+
     return {
       statusCode: 200,
       headers: {
-        "Access-Control-Allow-Origin": "*",
-        "Cache-Control": "no-store",
-        "Content-Type": ct,
+        "content-type": contentType,
+        "cache-control": "public, max-age=3600",
       },
-      body: Buffer.from(buf).toString("base64"),
+      // return bytes (Base64 encoded for the platform), browser receives **raw bytes**
       isBase64Encoded: true,
+      body: Buffer.from(arrayBuf).toString("base64"),
     };
   } catch (e) {
-    return text(500, String(e && e.message ? e.message : e));
+    return { statusCode: 500, body: `Proxy error: ${e?.message || e}` };
   }
 };
-
-function text(status, body) {
-  return {
-    statusCode: status,
-    headers: {
-      "Access-Control-Allow-Origin": "*",
-      "Cache-Control": "no-store",
-      "Content-Type": "text/plain; charset=utf-8",
-    },
-    body,
-  };
-}
-function json(status, data) {
-  return {
-    statusCode: status,
-    headers: {
-      "Access-Control-Allow-Origin": "*",
-      "Cache-Control": "no-store",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(data, null, 2),
-  };
-}
