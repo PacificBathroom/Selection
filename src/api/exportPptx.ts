@@ -278,15 +278,14 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
 
     // Code/SKU (hyperlinked to PDF if present)
     if (code) {
-  s.addText(
+s.addText(
   [
     {
       text: code,
       options: {
         hyperlink: pdfUrl ? { url: pdfUrl } : undefined,
         color: brand.accent,
--       underline: "single",
-+       underline: "sng",
+        underline: "sng", // pptxgenjs v3.x: "sng" = single underline
         fontSize: 14,
       },
     },
@@ -325,14 +324,21 @@ s.addText(
       options: {
         hyperlink: { url: pdfUrl },
         color: brand.accent,
--       underline: "single",
-+       underline: "sng",
+        underline: "sng", // was "single"
         fontSize: 14,
       },
     },
   ],
-  { x: L.rightPane.x, y: L.tableY + 1.0, w: L.rightPane.w, h: 0.5, align: "center", fontFace: "Inter" } as any
+  {
+    x: L.rightPane.x,
+    y: L.tableY + 1.0,
+    w: L.rightPane.w,
+    h: 0.5,
+    align: "center",
+    fontFace: "Inter",
+  } as any
 );
+
 
 
       }
