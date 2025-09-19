@@ -1,19 +1,22 @@
+// vite.config.ts
 import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react-swc";
-import { fileURLToPath, URL } from "node:url";
+import react from "@vitejs/plugin-react";
 
+// https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react()],
-  resolve: {
-    alias: {
-      "@": fileURLToPath(new URL("./src", import.meta.url)),
-    },
-  },
-});
-
   build: {
-    // optional tweaks
+    outDir: "dist",
     sourcemap: false,
-    chunkSizeWarningLimit: 1500,
+    target: "es2020",
+  },
+  // (Optional) local dev proxy; Netlify handles /api in production via redirects
+  server: {
+    proxy: {
+      "/api": {
+        target: "http://localhost:8888",
+        changeOrigin: true,
+      },
+    },
   },
 });
