@@ -67,3 +67,30 @@ function cors(extra = {}) {
     ...extra,
   };
 }
+
+// netlify/functions/pdf-proxy.js
+export default async (req, context) => {
+  const url = new URL(req.url).searchParams.get("url");
+  if (!url || !/^https?:\/\//i.test(url)) {
+    return new Response("Missing or invalid ?url=", { status: 400 });
+  }
+
+  try {
+    const upstream = await fetch(url, { redirect: "follow" });
+    if (!upstream.ok) {
+      return new Response(`Upstream error: ${upstream.status}`, { status: 502 });
+    }
+
+    const headers = new Headers();
+    // pass through useful headers
+    const ct = upstream.headers.get("content-type") || "application/octet-stream";
+    headers.set("content-type", ct);
+    headers.set("cache-control", "public, max-age=3600");
+    headers.set("access-control-allow-origin", "*");
+
+    return new Response(upstream.body, { status: 200, headers });
+  } catch (e) {
+    return new Response("Proxy fetch failed", { status: 502 });
+  }
+};
+
