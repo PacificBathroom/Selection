@@ -278,7 +278,7 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
 
     // Code/SKU (hyperlinked to PDF if present)
     if (code) {
-     s.addText(
+  s.addText(
   [
     {
       text: code,
@@ -286,13 +286,14 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
         hyperlink: pdfUrl ? { url: pdfUrl } : undefined,
         color: brand.accent,
 -       underline: "single",
-+       underline: { style: "sng" },
++       underline: "sng",
         fontSize: 14,
       },
     },
   ],
   { ...L.sku, fontFace: "Inter", fontSize: 14, align: "left" } as any
 );
+
 
     // Right side: specs table → or PDF thumbnail → or placeholder+link
     if (specs.length) {
@@ -317,7 +318,7 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
           x: L.rightPane.x, y: L.tableY, w: L.rightPane.w, h: L.rightPane.h - (L.tableY - L.rightPane.y),
           fill: { color: brand.faint }, line: { color: "E2E8F0", width: 1 },
         } as any);
-       s.addText(
+s.addText(
   [
     {
       text: "View specs",
@@ -325,13 +326,14 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
         hyperlink: { url: pdfUrl },
         color: brand.accent,
 -       underline: "single",
-+       underline: { style: "sng" },
++       underline: "sng",
         fontSize: 14,
       },
     },
   ],
   { x: L.rightPane.x, y: L.tableY + 1.0, w: L.rightPane.w, h: 0.5, align: "center", fontFace: "Inter" } as any
 );
+
 
       }
     } else {
