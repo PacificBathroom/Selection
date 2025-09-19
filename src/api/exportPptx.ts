@@ -255,8 +255,28 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
     // Right code line (hyperlink if we have a URL)
     if (code) {
       s.addText(
-        [{ text: code, options: { hyperlink: pdfUrl ? { url: pdfUrl } : undefined, color: brand.accent, underline: { style: "heavy" }, fontSize: 14 } }],
-        { ...L.rightSku, fontFace: "Inter", fontSize: 14, align: "left" } as any
+// Code line
+[{ 
+  text: code, 
+  options: {
+    hyperlink: pdfUrl ? { url: pdfUrl } : undefined,
+    color: brand.accent,
+    underline: { style: "sng" },   // ← was "heavy"
+    fontSize: 14
+  } 
+}]
+
+// “View specs” link
+[{ 
+  text: "View specs", 
+  options: { 
+    hyperlink: { url: pdfUrl! },
+    color: brand.accent,
+    underline: { style: "sng" },   // ← was "heavy"
+    fontSize: 14 
+  } 
+}]
+
       );
     }
 
