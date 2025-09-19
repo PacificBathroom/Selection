@@ -2,42 +2,37 @@
 import PptxGenJS from "pptxgenjs";
 import type { Product, ClientInfo } from "../types";
 
-// PDF.js worker (optional — used only for PDF thumbnails)
+// PDF.js worker (only used for PDF thumbnails)
 import workerSrc from "pdfjs-dist/build/pdf.worker.mjs?url";
 import * as pdfjsLib from "pdfjs-dist";
 (pdfjsLib as any).GlobalWorkerOptions.workerSrc = workerSrc;
 
-// ---------------------------------------------------------------------
+// -------------------------------------------------------------
 // Settings
-// ---------------------------------------------------------------------
-
-// Turn this off if your proxy struggles with some hosts (placeholders+links will be shown instead)
-const SHOW_PDF_THUMBS = true;
-
-// Use our Netlify function to fetch cross-origin assets
+// -------------------------------------------------------------
+const SHOW_PDF_THUMBS = true; // set false if your proxy has trouble with PDFs
 const PROXY = (u: string) => `/api/pdf-proxy?url=${encodeURIComponent(u)}`;
 
-// ---------------------------------------------------------------------
-// Small helpers
-// ---------------------------------------------------------------------
-
+// -------------------------------------------------------------
+// Helpers
+// -------------------------------------------------------------
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 const str = (v: unknown) => {
   if (v == null) return undefined;
   const s = String(v).trim();
-  return s ? s : undefined;
+  return s || undefined;
 };
 const ensureHttps = (u?: string) =>
   u?.startsWith("http://") ? u.replace(/^http:\/\//i, "https://") : u;
 
-// IMAGE("...") extractor for Google Sheets
+// Extract URL from =IMAGE("https://…") used in Google Sheets
 function extractUrlFromImageFormula(v: unknown): string | undefined {
   if (typeof v !== "string") return undefined;
   const m = v.trim().match(/^=*\s*image\s*\(\s*"([^"]+)"\s*(?:,.*)?\)\s*$/i);
   return m?.[1];
 }
 
-// Case/space-insensitive getter with aliases (also unwraps IMAGE("..."))
+// Case/space-insensitive getter with aliases (unwraps IMAGE())
 function getField<T = unknown>(row: Record<string, any>, aliases: string[]): T | undefined {
   const want = aliases.map(norm);
   for (const k of Object.keys(row)) {
@@ -51,7 +46,6 @@ function getField<T = unknown>(row: Record<string, any>, aliases: string[]): T |
   return undefined;
 }
 
-// Promise helper: blob -> dataURL
 function blobToDataURL(blob: Blob): Promise<string> {
   return new Promise((resolve) => {
     const fr = new FileReader();
@@ -60,10 +54,8 @@ function blobToDataURL(blob: Blob): Promise<string> {
   });
 }
 
-// Given ANY image URL, return a **PNG data URL** suitable for PptxGenJS.
-// - Tries the proxy first (CORS-safe), then direct
-// - Converts WEBP/GIF/etc. to PNG via <canvas>
-// - Ignores non-image URLs (e.g. product pages)
+// Fetch any image URL -> **PNG data URL** (proxy first, then direct).
+// Re-encodes via <canvas> so PowerPoint always gets PNG/JPEG-safe data.
 async function fetchImageAsPngDataUrl(url?: string): Promise<string | undefined> {
   if (!url) return undefined;
   const safe = ensureHttps(url)!;
@@ -71,17 +63,10 @@ async function fetchImageAsPngDataUrl(url?: string): Promise<string | undefined>
   async function tryOnce(u: string): Promise<string | undefined> {
     const res = await fetch(u);
     if (!res.ok) return undefined;
-
     const blob = await res.blob();
+    if (blob.type && !blob.type.startsWith("image/")) return undefined; // ignore HTML, etc.
 
-    // If the server gave us HTML/others, bail (it’s not an image)
-    if (blob.type && !blob.type.startsWith("image/")) return undefined;
-
-    // Convert anything to PNG (including webp)
     const dataUrl = await blobToDataURL(blob);
-
-    // If it's already png/jpeg, we could return it right away, but to be safe
-    // and consistent, always re-encode as PNG (PptxGenJS is happiest with PNG/JPEG)
     return await new Promise<string | undefined>((resolve) => {
       const img = new Image();
       img.onload = () => {
@@ -92,17 +77,16 @@ async function fetchImageAsPngDataUrl(url?: string): Promise<string | undefined>
           const ctx = canvas.getContext("2d");
           if (!ctx) return resolve(undefined);
           ctx.drawImage(img, 0, 0);
-          resolve(canvas.toDataURL("image/png")); // <- guaranteed PNG header
+          resolve(canvas.toDataURL("image/png")); // normalized PNG
         } catch {
           resolve(undefined);
         }
       };
       img.onerror = () => resolve(undefined);
-      img.src = dataUrl; // same-origin (data:) so canvas is not tainted
+      img.src = dataUrl;
     });
   }
 
-  // Proxy, then direct
   try {
     const viaProxy = await tryOnce(PROXY(safe));
     if (viaProxy) return viaProxy;
@@ -114,14 +98,12 @@ async function fetchImageAsPngDataUrl(url?: string): Promise<string | undefined>
   }
 }
 
-// First page of a PDF -> PNG dataURL (via proxy). Falls back to undefined.
+// First page of a PDF -> PNG data URL (proxy). Falls back to undefined.
 async function pdfFirstPageToPng(pdfUrl?: string): Promise<string | undefined> {
   if (!pdfUrl || !SHOW_PDF_THUMBS) return undefined;
   const url = ensureHttps(pdfUrl)!;
   try {
-    const doc = await (pdfjsLib as any)
-      .getDocument({ url: PROXY(url), useSystemFonts: true })
-      .promise;
+    const doc = await (pdfjsLib as any).getDocument({ url: PROXY(url), useSystemFonts: true }).promise;
     const page = await doc.getPage(1);
     const viewport = page.getViewport({ scale: 1.35 });
     const canvas = document.createElement("canvas");
@@ -136,7 +118,7 @@ async function pdfFirstPageToPng(pdfUrl?: string): Promise<string | undefined> {
   }
 }
 
-// Build spec pairs from a row
+// Build up to 10 spec rows from various shapes of input
 function toSpecPairs(row: Record<string, any>): Array<[string, string]> {
   const pairs: Array<[string, string]> = [];
 
@@ -174,8 +156,10 @@ function toSpecPairs(row: Record<string, any>): Array<[string, string]> {
         ["name","product","title","code","sku","image","imageurl","photo","thumbnail","url","link",
          "pdf","pdfurl","specpdfurl","description","desc"].includes(nk)
       ) continue;
+
       const val = String(row[key] ?? "").trim();
       if (!val) continue;
+
       if (SPECY.includes(nk) || val.length <= 120) {
         pairs.push([key.replace(/\s+/g, " ").trim(), val]);
       }
@@ -186,10 +170,9 @@ function toSpecPairs(row: Record<string, any>): Array<[string, string]> {
   return pairs.slice(0, 10);
 }
 
-// ---------------------------------------------------------------------
+// -------------------------------------------------------------
 // PPT Export
-// ---------------------------------------------------------------------
-
+// -------------------------------------------------------------
 export async function exportSelectionToPptx(rows: Product[], client: ClientInfo) {
   const pptx = new PptxGenJS();
   pptx.layout = "LAYOUT_16x9";
@@ -197,10 +180,10 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
 
   const brand = {
     bg: "FFFFFF",
-    text: "0F172A",        // slate-900
-    accent: "1E6BD7",      // link
-    faint: "F1F5F9",       // slate-100
-    bar: "45D6C6",         // footer bar (teal)
+    text: "0F172A",    // slate-900
+    accent: "1E6BD7",  // link blue
+    faint: "F1F5F9",   // slate-100
+    bar: "24D3EE",     // footer bar (your original bright blue)
     zebra: ["F8FAFC", "FFFFFF"],
   };
 
@@ -209,7 +192,7 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
     const s = pptx.addSlide();
     s.background = { color: brand.bg };
     s.addText(client.projectName || "Project Selection", {
-      x: 0.5, y: 1.1, w: 9.0, h: 1.1,
+      x: 0.4, y: 1.0, w: 9.2, h: 1.1,
       fontFace: "Inter", fontSize: 40, bold: true, color: brand.text, align: "center",
     } as any);
     const lines: string[] = [];
@@ -217,26 +200,26 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
     if (client.dateISO) lines.push(client.dateISO);
     if (lines.length) {
       s.addText(lines.join("  ·  "), {
-        x: 0.5, y: 2.2, w: 9.0, h: 0.6,
+        x: 0.4, y: 2.2, w: 9.2, h: 0.6,
         fontFace: "Inter", fontSize: 16, color: "666666", align: "center",
       } as any);
     }
   }
 
-  // Layout constants
+  // Layout (16x9 slide height is ~5.63")
   const L = {
-    img:       { x: 0.6, y: 1.2, w: 5.2, h: 3.8 },
-    rightPane: { x: 6.1, y: 1.2, w: 3.5, h: 3.9 },
-    title:     { x: 0.8, y: 0.6, w: 8.5, h: 0.7 },
-    sku:       { x: 6.1, y: 1.8, w: 3.5, h: 0.4 },
-    tableY:    2.25,
-    desc:      { x: 0.7, y: 5.0, w: 8.6, h: 0.45 },
-    bar:       { x: 0.0, y: 5.45, w: 10.0, h: 0.25 },
-    barText:   { x: 0.6, y: 5.22, w: 8.8, h: 0.25 },
+    title:     { x: 0.5, y: 0.5, w: 9.0, h: 0.7 },
+    img:       { x: 0.5, y: 1.0, w: 5.2, h: 3.7 },
+    rightPane: { x: 6.0, y: 1.0, w: 3.5, h: 3.9 },
+    sku:       { x: 6.0, y: 1.6, w: 3.5, h: 0.4 },
+    tableY:    2.1,
+    desc:      { x: 0.6, y: 4.8, w: 8.8, h: 0.45 },
+    bar:       { x: 0.0, y: 5.33, w: 10.0, h: 0.30 },
+    barText:   { x: 0.6, y: 5.06, w: 8.8, h: 0.25 },
   };
 
   for (const row of rows as unknown as Record<string, any>[]) {
-    // Resolve fields
+    // Resolve row fields (accepts lots of header variations, incl. IMAGE())
     const title =
       str(getField(row, ["Name", "Product", "Title"])) ||
       str((row as any).name) ||
@@ -254,36 +237,33 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
       str((row as any).sku) ||
       undefined;
 
-    const imageUrl =
-      ensureHttps(
-        str(getField(row, ["ImageURL","Image URL","Image","Photo","Thumbnail","Picture"])) ||
-        str((row as any).imageUrl) ||
-        str((row as any).image) ||
-        str((row as any).thumbnail)
-      );
+    const imageUrl = ensureHttps(
+      str(getField(row, ["ImageURL","Image URL","Image","Photo","Thumbnail","Picture"])) ||
+      str((row as any).imageUrl) ||
+      str((row as any).image) ||
+      str((row as any).thumbnail)
+    );
 
-    const pdfUrl =
-      ensureHttps(
-        str(getField(row, ["PDF URL","PdfURL","Spec PDF","Spec Sheet","Datasheet","Brochure","URL","Link"])) ||
-        str((row as any).pdfUrl) ||
-        str((row as any).specPdfUrl) ||
-        str((row as any).url) ||
-        str((row as any).link)
-      );
+    const pdfUrl = ensureHttps(
+      str(getField(row, ["PDF URL","PdfURL","Spec PDF","Spec Sheet","Datasheet","Brochure","URL","Link"])) ||
+      str((row as any).pdfUrl) ||
+      str((row as any).specPdfUrl) ||
+      str((row as any).url) ||
+      str((row as any).link)
+    );
 
     const specs = toSpecPairs(row);
 
-    // Slide
     const s = pptx.addSlide();
     s.background = { color: brand.bg };
 
-    // Title (full width top, shrink if long)
+    // Title
     s.addText(title, {
       ...L.title,
       fontFace: "Inter", fontSize: 22, bold: true, color: brand.text, align: "center", fit: "shrink",
     } as any);
 
-    // Left image
+    // Left image (ignore product page URLs; we need a direct image)
     let imgData: string | undefined;
     if (imageUrl && !/\/product\//i.test(imageUrl)) {
       imgData = await fetchImageAsPngDataUrl(imageUrl);
@@ -296,29 +276,25 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
       } as any);
     }
 
-    // SKU (and link if pdf exists)
+    // Code/SKU (hyperlinked to PDF if present)
     if (code) {
-s.addText(
-  [
-    {
-      text: code,
-      options: {
-        hyperlink: pdfUrl ? { url: pdfUrl } : undefined,
-        color: brand.accent,
-        underline: true,
-        fontSize: 14,
-      } as any, // <-- add this cast
-    },
-  ] as any,
-  { ...L.sku, fontFace: "Inter", fontSize: 14, align: "left" } as any
-);
+      s.addText(
+        [
+          {
+            text: code,
+            options: {
+              hyperlink: pdfUrl ? { url: pdfUrl } : undefined,
+              color: brand.accent,
+              underline: { style: "single" }, // TS-safe shape; still cast to any below
+              fontSize: 14,
+            },
+          },
+        ],
+        { ...L.sku, fontFace: "Inter", fontSize: 14, align: "left" } as any
+      );
+    }
 
-
-
-
-
-
-    // Right side: specs table or PDF thumb or placeholder
+    // Right side: specs table → or PDF thumbnail → or placeholder+link
     if (specs.length) {
       const rowsData = specs.map(([label, value], i) => ([
         { text: label || "", options: { bold: true, fontSize: 12, fill: { color: brand.zebra[i % 2] } } },
@@ -341,26 +317,20 @@ s.addText(
           x: L.rightPane.x, y: L.tableY, w: L.rightPane.w, h: L.rightPane.h - (L.tableY - L.rightPane.y),
           fill: { color: brand.faint }, line: { color: "E2E8F0", width: 1 },
         } as any);
-        // Put a link to the PDF so there's still something actionable
-s.addText(
-  [
-    {
-      text: code,
-      options: {
-        hyperlink: pdfUrl ? { url: pdfUrl } : undefined,
-        color: brand.accent,
-        underline: true,
-        fontSize: 14,
-      } as any, // <-- add this cast
-    },
-  ] as any,
-  { ...L.sku, fontFace: "Inter", fontSize: 14, align: "left" } as any
-);
-
-
-
-
-
+        s.addText(
+          [
+            {
+              text: "View specs",
+              options: {
+                hyperlink: { url: pdfUrl },
+                color: brand.accent,
+                underline: { style: "single" },
+                fontSize: 14,
+              },
+            },
+          ],
+          { x: L.rightPane.x, y: L.tableY + 1.0, w: L.rightPane.w, h: 0.5, align: "center", fontFace: "Inter" } as any
+        );
       }
     } else {
       s.addShape(pptx.ShapeType.roundRect, {
@@ -376,7 +346,7 @@ s.addText(
       } as any);
     }
 
-    // Footer bar + (optionally) code
+    // Footer bar + code again (subtle branding)
     s.addShape(pptx.ShapeType.rect, { ...L.bar, fill: { color: brand.bar }, line: { color: brand.bar } } as any);
     if (code) {
       s.addText(code, { ...L.barText, fontFace: "Inter", fontSize: 12, color: "0B3A33", align: "left" } as any);
@@ -388,8 +358,7 @@ s.addText(
     const s = pptx.addSlide();
     s.background = { color: brand.bg };
     s.addText("Thank you", {
-      x: 0.8, y: 2.0, w: 8.5, h: 1,
-      fontFace: "Inter", fontSize: 36, bold: true, color: brand.text, align: "center",
+      x: 0.8, y: 2.0, w: 8.5, h: 1, fontFace: "Inter", fontSize: 36, bold: true, color: brand.text, align: "center",
     } as any);
     const parts: string[] = [];
     if (client.contactName) parts.push(client.contactName);
@@ -397,8 +366,7 @@ s.addText(
     if (client.contactPhone) parts.push(client.contactPhone);
     if (parts.length) {
       s.addText(parts.join("  ·  "), {
-        x: 0.8, y: 3.2, w: 8.5, h: 0.8,
-        fontFace: "Inter", fontSize: 16, color: "666666", align: "center",
+        x: 0.8, y: 3.2, w: 8.5, h: 0.8, fontFace: "Inter", fontSize: 16, color: "666666", align: "center",
       } as any);
     }
   }
@@ -406,5 +374,5 @@ s.addText(
   await pptx.writeFile({ fileName: "Product-Presentation.pptx" } as any);
 }
 
-// Alias expected by the rest of your app
+// Alias used elsewhere
 export const exportPptx = exportSelectionToPptx;
