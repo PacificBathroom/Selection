@@ -2,14 +2,14 @@
 import PptxGenJS from "pptxgenjs";
 import type { Product, ClientInfo } from "../types";
 
-// -------------------------------------------------------------
-// Settings
-// -------------------------------------------------------------
+// ------------------------------------------------------------------
+// Proxy for remote files (must exist as a Netlify function you added)
+// ------------------------------------------------------------------
 const PROXY = (u: string) => `/api/file-proxy?url=${encodeURIComponent(u)}`;
 
-// -------------------------------------------------------------
-// Helpers
-// -------------------------------------------------------------
+// ------------------------------------------------------------------
+// Utilities
+// ------------------------------------------------------------------
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 const str = (v: unknown) => {
   if (v == null) return undefined;
@@ -19,19 +19,18 @@ const str = (v: unknown) => {
 const ensureHttps = (u?: string) =>
   u?.startsWith("http://") ? u.replace(/^http:\/\//i, "https://") : u;
 
-// Google Sheets: =IMAGE("https://…") → extract URL
+// =IMAGE("https://…") → "https://…"
 function extractUrlFromImageFormula(v: unknown): string | undefined {
   if (typeof v !== "string") return undefined;
   const m = v.trim().match(/^=*\s*image\s*\(\s*"([^"]+)"\s*(?:,.*)?\)\s*$/i);
   return m?.[1];
 }
 
-// Case/space-insensitive getter with aliases (unwraps IMAGE())
+// Preference-based getter (case/space-insensitive, unwraps IMAGE()).
 function getField<T = unknown>(row: Record<string, any>, aliases: string[]): T | undefined {
   const want = aliases.map(norm);
   for (const k of Object.keys(row)) {
-    const nk = norm(k);
-    if (want.includes(nk)) {
+    if (want.includes(norm(k))) {
       const raw = row[k];
       const img = extractUrlFromImageFormula(raw);
       return (img ?? raw) as T;
@@ -40,7 +39,22 @@ function getField<T = unknown>(row: Record<string, any>, aliases: string[]): T |
   return undefined;
 }
 
-// Server-proxied fetch -> DataURL (no canvas; fewer failure points)
+// Robust autodetection across *any* column:
+function findFirstUrl(row: Record<string, any>, pred: (u: string) => boolean): string | undefined {
+  for (const [_, v] of Object.entries(row)) {
+    const raw = extractUrlFromImageFormula(v) ?? (typeof v === "string" ? v : undefined);
+    if (!raw) continue;
+    const m = raw.match(/https?:\/\/[^\s")]+/i);
+    if (!m) continue;
+    const u = ensureHttps(m[0])!;
+    if (pred(u)) return u;
+  }
+  return undefined;
+}
+const looksImage = (u: string) => /\.(png|jpe?g|webp|gif|bmp|svg)(\?|$)/i.test(u) || /image=|img=|\/images?\//i.test(u);
+const looksPdf   = (u: string) => /\.pdf(\?|$)/i.test(u) || /\/pdfs?\//i.test(u);
+
+// Server-proxied fetch → DataURL (no canvas, fewer failure points)
 async function fetchViaProxyAsDataUrl(url?: string): Promise<string | undefined> {
   if (!url) return undefined;
   const safe = ensureHttps(url)!;
@@ -48,25 +62,22 @@ async function fetchViaProxyAsDataUrl(url?: string): Promise<string | undefined>
     const res = await fetch(PROXY(safe));
     if (!res.ok) return undefined;
     const blob = await res.blob();
-    // If the server returns non-image (e.g., HTML), pptxgenjs will fail; bail early.
     if (blob.type && !blob.type.startsWith("image/")) return undefined;
-
     const fr = new FileReader();
-    const dataUrl: string = await new Promise((resolve) => {
+    return await new Promise<string>((resolve) => {
       fr.onload = () => resolve(String(fr.result));
       fr.readAsDataURL(blob);
     });
-    return dataUrl;
   } catch {
     return undefined;
   }
 }
 
-// Build up to 12 spec rows from whatever fields exist.
-// Much more permissive: will pick any short-ish value for table display.
+// Build specs from a variety of shapes
 function toSpecPairs(row: Record<string, any>): Array<[string, string]> {
   const pairs: Array<[string, string]> = [];
 
+  // 1) Long “specifications”/“features” field split into rows
   const long =
     str(getField(row, ["Specifications","Specs","Product Details","Details","Features"])) ||
     str((row as any).specifications) ||
@@ -77,29 +88,61 @@ function toSpecPairs(row: Record<string, any>): Array<[string, string]> {
       const m = part.match(/^(.+?)\s*[:\-–]\s*(.+)$/);
       if (m) pairs.push([m[1].trim(), m[2].trim()]);
       else pairs.push(["", part]);
-      if (pairs.length >= 12) return pairs;
+      if (pairs.length >= 14) return pairs;
     }
   }
 
+  // 2) Array form: [{label, value}]
+  if (Array.isArray((row as any).specs)) {
+    for (const it of (row as any).specs as Array<{label?: string; value?: string}>) {
+      const label = String(it?.label ?? "").trim();
+      const value = String(it?.value ?? "").trim();
+      if (label || value) pairs.push([label, value]);
+      if (pairs.length >= 14) return pairs;
+    }
+  }
+
+  // 3) Any short-ish columns become rows, excluding obvious non-specs
   const EXCLUDE = new Set([
     "name","product","title","code","sku","image","imageurl","photo","thumbnail",
-    "url","link","pdf","pdfurl","specpdfurl","description","desc","notes","comments"
+    "url","link","pdf","pdfurl","specpdfurl","description","desc","notes","comments",
+    "category","price","cost","qty","quantity","supplier","brand"
   ]);
-  for (const key of Object.keys(row)) {
+  for (const [key, raw] of Object.entries(row)) {
     const nk = norm(key);
     if (EXCLUDE.has(nk)) continue;
-    const val = String(row[key] ?? "").trim();
+    const val = String(raw ?? "").trim();
     if (!val) continue;
-    if (val.length <= 160) pairs.push([key.replace(/\s+/g, " ").trim(), val]);
-    if (pairs.length >= 12) break;
+    if (val.length <= 180) pairs.push([key.replace(/\s+/g, " ").trim(), val]);
+    if (pairs.length >= 14) break;
   }
 
   return pairs;
 }
 
-// -------------------------------------------------------------
-// PPT Export (simple & robust)
-// -------------------------------------------------------------
+// Pick a description even if header names don't match (choose the longest reasonable text)
+function pickDescription(row: Record<string, any>): string | undefined {
+  const preferred =
+    str(getField(row, ["Description","Desc","Summary","Notes","Comments","Long Description","Short Description"])) ||
+    str((row as any).description) ||
+    str((row as any).notes) ||
+    str((row as any).comments);
+  if (preferred) return preferred;
+
+  let best: string | undefined;
+  for (const v of Object.values(row)) {
+    if (typeof v !== "string") continue;
+    const s = v.trim();
+    if (s.length >= 40 && s.length <= 600 && /\s/.test(s)) {
+      if (!best || s.length > best.length) best = s;
+    }
+  }
+  return best;
+}
+
+// ------------------------------------------------------------------
+// PPT Export
+// ------------------------------------------------------------------
 export async function exportSelectionToPptx(rows: Product[], client: ClientInfo) {
   const pptx = new PptxGenJS();
   pptx.layout = "LAYOUT_16x9";
@@ -133,15 +176,16 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
     }
   }
 
+  // Slide layout
   const L = {
     title:     { x: 0.5, y: 0.5, w: 9.0, h: 0.7 },
     img:       { x: 0.5, y: 1.0, w: 5.2, h: 3.7 },
     rightPane: { x: 6.0, y: 1.0, w: 3.5, h: 3.9 },
-    sku:       { x: 6.0, y: 1.6, w: 3.5, h: 0.4 },
+    sku:       { x: 6.0, y: 1.6, w: 3.5, h: 0.45 },
     tableY:    2.1,
-    desc:      { x: 0.6, y: 4.8, w: 8.8, h: 0.6 },
-    bar:       { x: 0.0, y: 5.33, w: 10.0, h: 0.30 },
-    barText:   { x: 0.6, y: 5.06, w: 8.8, h: 0.25 },
+    desc:      { x: 0.6, y: 4.7, w: 8.8, h: 0.62 }, // slightly higher to avoid viewer clipping
+    bar:       { x: 0.0, y: 5.18, w: 10.0, h: 0.32 }, // moved up a bit for mobile PPT viewers
+    barText:   { x: 0.6, y: 4.94, w: 8.8, h: 0.25 },
   };
 
   for (const row of rows as unknown as Record<string, any>[]) {
@@ -151,34 +195,31 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
       str((row as any).product) ||
       "Untitled Product";
 
-    const description =
-      str(getField(row, ["Description","Desc","Summary","Notes","Comments","Long Description","Short Description"])) ||
-      str((row as any).description) ||
-      str((row as any).notes) ||
-      str((row as any).comments) ||
-      undefined;
-
     const code =
       str(getField(row, ["Code","SKU","Model","Item","Product Code"])) ||
       str((row as any).code) ||
       str((row as any).sku) ||
       undefined;
 
-    const imageUrl = ensureHttps(
-      str(getField(row, ["ImageURL","Image URL","Image","Photo","Thumbnail","Picture"])) ||
-      str((row as any).imageUrl) ||
-      str((row as any).image) ||
-      str((row as any).thumbnail)
-    );
+    // Image/PDF/Description with *autodetection* fallbacks
+    const imageUrl =
+      ensureHttps(
+        str(getField(row, ["ImageURL","Image URL","Image","Photo","Thumbnail","Picture"])) ||
+        str((row as any).imageUrl) ||
+        str((row as any).image) ||
+        str((row as any).thumbnail)
+      ) || findFirstUrl(row, looksImage);
 
-    const pdfUrl = ensureHttps(
-      str(getField(row, ["PDF","PDF URL","PdfURL","Spec PDF","Spec Sheet","Datasheet","Brochure","URL","Link"])) ||
-      str((row as any).pdfUrl) ||
-      str((row as any).specPdfUrl) ||
-      str((row as any).url) ||
-      str((row as any).link)
-    );
+    const pdfUrl =
+      ensureHttps(
+        str(getField(row, ["PDF","PDF URL","PdfURL","Spec PDF","Spec Sheet","Datasheet","Brochure","URL","Link"])) ||
+        str((row as any).pdfUrl) ||
+        str((row as any).specPdfUrl) ||
+        str((row as any).url) ||
+        str((row as any).link)
+      ) || findFirstUrl(row, looksPdf);
 
+    const description = pickDescription(row);
     const specs = toSpecPairs(row);
 
     const s = pptx.addSlide();
@@ -190,7 +231,7 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
       fontFace: "Inter", fontSize: 22, bold: true, color: brand.text, align: "center", fit: "shrink",
     } as any);
 
-    // Left image: proxy + dataURL (robust)
+    // Left image (via proxy)
     let imgData: string | undefined;
     if (imageUrl && !/\/product\//i.test(imageUrl)) {
       imgData = await fetchViaProxyAsDataUrl(imageUrl);
@@ -203,7 +244,7 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
       } as any);
     }
 
-    // SKU/Code (link to PDF if present)
+    // SKU/Code (linked to PDF)
     if (code) {
       s.addText(
         [{ text: code, options: {
@@ -223,7 +264,7 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
         { text: value || "", options: { fontSize: 12, fill: { color: brand.zebra[i % 2] } } },
       ]));
       s.addTable(rowsData as any, {
-        x: L.rightPane.x, y: L.tableY, w: L.rightPane.w, colW: [1.5, 2.0],
+        x: L.rightPane.x, y: L.tableY, w: L.rightPane.w, colW: [1.6, 1.9],
         border: { style: "none" }, margin: 0.04,
       } as any);
     } else {
@@ -251,7 +292,7 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
       } as any);
     }
 
-    // Footer bar + code again
+    // Footer bar + code (always drawn)
     s.addShape(pptx.ShapeType.rect, { ...L.bar, fill: { color: brand.bar }, line: { color: brand.bar } } as any);
     if (code) {
       s.addText(code, { ...L.barText, fontFace: "Inter", fontSize: 12, color: "0B3A33", align: "left" } as any);
