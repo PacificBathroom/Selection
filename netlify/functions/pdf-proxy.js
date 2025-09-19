@@ -1,28 +1,41 @@
-// netlify/functions/pdf-proxy.ts
-import type { Handler } from "@netlify/functions";
-
-export const handler: Handler = async (event) => {
+// netlify/functions/pdf-proxy.js
+// Fetch a remote file and return it to the browser, working around CORS.
+// - Follows redirects
+// - Tries HTTPS, then HTTP (or vice versa) if the first fails
+export const handler = async (event) => {
   try {
-    const url = event.queryStringParameters?.url;
-    if (!url) return { statusCode: 400, body: "Missing ?url=" };
+    const raw = event.queryStringParameters?.url || "";
+    const url = new URL(raw);
 
-    const upstream = await fetch(url as string);
-    const arrayBuf = await upstream.arrayBuffer();
-    const buf = Buffer.from(arrayBuf);
+    if (!/^https?:$/i.test(url.protocol)) {
+      return { statusCode: 400, body: "Only http/https URLs are allowed" };
+    }
 
-    const contentType =
-      upstream.headers.get("content-type") || "application/octet-stream";
+    const fetchOnce = async (u) => {
+      const r = await fetch(u, { redirect: "follow" });
+      if (!r.ok) throw new Error(`Upstream ${r.status}`);
+      const ct = r.headers.get("content-type") || "application/octet-stream";
+      const buf = Buffer.from(await r.arrayBuffer());
+      return { ct, b64: buf.toString("base64") };
+    };
+
+    let out;
+    try {
+      out = await fetchOnce(url.toString());
+    } catch {
+      // Flip protocol (helps with odd TLS configs)
+      const flipped = new URL(url.toString());
+      flipped.protocol = url.protocol === "https:" ? "http:" : "https:";
+      out = await fetchOnce(flipped.toString());
+    }
 
     return {
-      statusCode: upstream.status,
-      headers: {
-        "content-type": contentType,
-        "cache-control": "public, max-age=3600",
-      },
+      statusCode: 200,
+      headers: { "content-type": out.ct },
+      body: out.b64,
       isBase64Encoded: true,
-      body: buf.toString("base64"),
     };
-  } catch (e: any) {
-    return { statusCode: 502, body: `Proxy error: ${e?.message || e}` };
+  } catch (e) {
+    return { statusCode: 502, body: JSON.stringify({ error: String(e?.message || e) }) };
   }
 };
