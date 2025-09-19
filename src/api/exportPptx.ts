@@ -278,21 +278,21 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
 
     // Code/SKU (hyperlinked to PDF if present)
     if (code) {
-      s.addText(
-        [
-          {
-            text: code,
-            options: {
-              hyperlink: pdfUrl ? { url: pdfUrl } : undefined,
-              color: brand.accent,
-              underline: { style: "single" }, // TS-safe shape; still cast to any below
-              fontSize: 14,
-            },
-          },
-        ],
-        { ...L.sku, fontFace: "Inter", fontSize: 14, align: "left" } as any
-      );
-    }
+     s.addText(
+  [
+    {
+      text: code,
+      options: {
+        hyperlink: pdfUrl ? { url: pdfUrl } : undefined,
+        color: brand.accent,
+-       underline: "single",
++       underline: { style: "sng" },
+        fontSize: 14,
+      },
+    },
+  ],
+  { ...L.sku, fontFace: "Inter", fontSize: 14, align: "left" } as any
+);
 
     // Right side: specs table → or PDF thumbnail → or placeholder+link
     if (specs.length) {
