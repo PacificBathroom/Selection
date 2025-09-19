@@ -1,57 +1,69 @@
 // netlify/functions/pdf-proxy.js
-// Fetches a remote file and returns it to the browser, bypassing CORS.
-// More robust against HTTPS↔HTTP mismatches and picky origin servers.
+// A tiny fetch proxy for images/PDFs so the browser can read cross-origin files.
+// Usage: /api/pdf-proxy?url=<encoded URL>
 
-export const handler = async (event) => {
+export async function handler(event) {
   try {
-    const raw = event.queryStringParameters?.url || "";
-    const url = new URL(raw);
-
-    if (!/^https?:$/i.test(url.protocol)) {
-      return { statusCode: 400, body: "Only http/https URLs are allowed" };
+    const url = (event.queryStringParameters && event.queryStringParameters.url) || "";
+    if (!url) {
+      return { statusCode: 400, headers: cors(), body: "Missing url" };
     }
 
-    const fetchOnce = async (u) => {
-      const r = await fetch(u, {
-        redirect: "follow",
-        headers: {
-          // Some hosts are picky about missing UA/accept headers
-          "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122 Safari/537.36",
-          "Accept": "*/*",
-          "Accept-Language": "en-US,en;q=0.8",
-        },
-      });
-      if (!r.ok) throw new Error(`Upstream ${r.status}`);
-      const ct = r.headers.get("content-type") || "application/octet-stream";
-      const buf = Buffer.from(await r.arrayBuffer());
-      return { ct, b64: buf.toString("base64") };
-    };
-
-    let out;
-    try {
-      out = await fetchOnce(url.toString());
-    } catch {
-      // Flip protocol (helps when the origin only serves one of http/https)
-      const flipped = new URL(url.toString());
-      flipped.protocol = url.protocol === "https:" ? "http:" : "https:";
-      out = await fetchOnce(flipped.toString());
+    // Basic safety: only allow http/https and strip CRLF etc.
+    const safe = String(url).trim();
+    if (!/^https?:\/\//i.test(safe)) {
+      return { statusCode: 400, headers: cors(), body: "Invalid protocol" };
     }
+
+    // Fetch upstream (stream to client)
+    const resp = await fetch(safe, {
+      redirect: "follow",
+      headers: {
+        // Some servers require a UA
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome Safari",
+        Accept:
+          "image/avif,image/webp,image/apng,image/*,application/pdf,*/*;q=0.8",
+      },
+    });
+
+    if (!resp.ok) {
+      return {
+        statusCode: resp.status,
+        headers: cors({ "Content-Type": "text/plain" }),
+        body: `Upstream error ${resp.status}`,
+      };
+    }
+
+    // Pass through content-type; default to octet-stream
+    const contentType = resp.headers.get("content-type") || "application/octet-stream";
+    const arrayBuffer = await resp.arrayBuffer();
+    const buff = Buffer.from(arrayBuffer);
 
     return {
       statusCode: 200,
-      headers: {
-        "content-type": out.ct,
-        "cache-control": "public, max-age=3600",
-        "access-control-allow-origin": "*", // not strictly needed, but harmless
-      },
-      body: out.b64,
+      headers: cors({
+        "Content-Type": contentType,
+        // Let the browser cache for a bit to speed repeat runs
+        "Cache-Control": "public, max-age=3600",
+      }),
+      body: buff.toString("base64"),
       isBase64Encoded: true,
     };
-  } catch (e) {
+  } catch (err) {
     return {
       statusCode: 502,
-      body: JSON.stringify({ error: String(e?.message || e) }),
+      headers: cors({ "Content-Type": "text/plain" }),
+      body: "Bad Gateway",
     };
   }
-};
+}
+
+function cors(extra = {}) {
+  return {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Range",
+    ...extra,
+  };
+}
