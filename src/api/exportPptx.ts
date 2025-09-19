@@ -278,21 +278,21 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
 
     // Code/SKU (hyperlinked to PDF if present)
     if (code) {
-s.addText(
-  [
-    {
-      text: code,
-      options: {
-        hyperlink: pdfUrl ? { url: pdfUrl } : undefined,
-        color: brand.accent,
-        underline: "sng", // pptxgenjs v3.x: "sng" = single underline
-        fontSize: 14,
-      },
-    },
-  ],
-  { ...L.sku, fontFace: "Inter", fontSize: 14, align: "left" } as any
-);
-
+      s.addText(
+        [
+          {
+            text: code,
+            options: {
+              hyperlink: pdfUrl ? { url: pdfUrl } : undefined,
+              color: brand.accent,
+              underline: "sng", // pptxgenjs v3.x: "sng" = single underline
+              fontSize: 14,
+            },
+          },
+        ],
+        { ...L.sku, fontFace: "Inter", fontSize: 14, align: "left" } as any
+      );
+    }
 
     // Right side: specs table → or PDF thumbnail → or placeholder+link
     if (specs.length) {
@@ -317,30 +317,27 @@ s.addText(
           x: L.rightPane.x, y: L.tableY, w: L.rightPane.w, h: L.rightPane.h - (L.tableY - L.rightPane.y),
           fill: { color: brand.faint }, line: { color: "E2E8F0", width: 1 },
         } as any);
-s.addText(
-  [
-    {
-      text: "View specs",
-      options: {
-        hyperlink: { url: pdfUrl },
-        color: brand.accent,
-        underline: "sng", // was "single"
-        fontSize: 14,
-      },
-    },
-  ],
-  {
-    x: L.rightPane.x,
-    y: L.tableY + 1.0,
-    w: L.rightPane.w,
-    h: 0.5,
-    align: "center",
-    fontFace: "Inter",
-  } as any
-);
-
-
-
+        s.addText(
+          [
+            {
+              text: "View specs",
+              options: {
+                hyperlink: { url: pdfUrl },
+                color: brand.accent,
+                underline: "sng", // was "single"
+                fontSize: 14,
+              },
+            },
+          ],
+          {
+            x: L.rightPane.x,
+            y: L.tableY + 1.0,
+            w: L.rightPane.w,
+            h: 0.5,
+            align: "center",
+            fontFace: "Inter",
+          } as any
+        );
       }
     } else {
       s.addShape(pptx.ShapeType.roundRect, {
