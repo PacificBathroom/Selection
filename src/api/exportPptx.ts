@@ -298,11 +298,25 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
 
     // SKU (and link if pdf exists)
     if (code) {
-      s.addText(
-        [{ text: code, options: { hyperlink: pdfUrl ? { url: pdfUrl } : undefined, color: brand.accent, underline: true, fontSize: 14 } }],
-        { ...L.sku, fontFace: "Inter", fontSize: 14, align: "left" } as any
-      );
-    }
+s.addText(
+  [
+    {
+      text: code,
+      options: {
+        hyperlink: pdfUrl ? { url: pdfUrl } : undefined,
+        color: brand.accent,
+        underline: true,
+        fontSize: 14,
+      } as any, // <-- add this cast
+    },
+  ] as any,
+  { ...L.sku, fontFace: "Inter", fontSize: 14, align: "left" } as any
+);
+
+
+
+
+
 
     // Right side: specs table or PDF thumb or placeholder
     if (specs.length) {
@@ -328,10 +342,25 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
           fill: { color: brand.faint }, line: { color: "E2E8F0", width: 1 },
         } as any);
         // Put a link to the PDF so there's still something actionable
-        s.addText(
-          [{ text: "View specs", options: { hyperlink: { url: pdfUrl }, color: brand.accent, underline: true, fontSize: 14 } }],
-          { x: L.rightPane.x, y: L.tableY + 1.0, w: L.rightPane.w, h: 0.5, align: "center", fontFace: "Inter" } as any
-        );
+s.addText(
+  [
+    {
+      text: code,
+      options: {
+        hyperlink: pdfUrl ? { url: pdfUrl } : undefined,
+        color: brand.accent,
+        underline: true,
+        fontSize: 14,
+      } as any, // <-- add this cast
+    },
+  ] as any,
+  { ...L.sku, fontFace: "Inter", fontSize: 14, align: "left" } as any
+);
+
+
+
+
+
       }
     } else {
       s.addShape(pptx.ShapeType.roundRect, {
