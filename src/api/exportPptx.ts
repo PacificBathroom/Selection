@@ -136,7 +136,7 @@ export async function exportSelectionToPptx(products: Product[], client: ClientI
 
   // Product slides
   for (const p of products) {
-    // --- DEBUG: what we’re about to place on the slide ---
+    // Debug info to verify incoming data
     console.log("PPT item", {
       title: p.name || p.product,
       imageUrl: p.imageUrl || p.image || p.thumbnail,
@@ -179,7 +179,7 @@ export async function exportSelectionToPptx(products: Product[], client: ClientI
           options: {
             hyperlink: url ? { url: String(url) } : undefined,
             color: brand.accent,
-            underline: true,
+            underline: { style: "heavy" }, // <-- FIXED: was 'true'
             fontSize: 14,
           },
         }],
@@ -224,7 +224,15 @@ export async function exportSelectionToPptx(products: Product[], client: ClientI
           fill: { color: brand.faint }, line: { color: "E2E8F0", width: 1 },
         } as any);
         s.addText(
-          [{ text: "View specs", options: { hyperlink: { url: String(p.pdfUrl || p.specPdfUrl) }, color: brand.accent, underline: true, fontSize: 14 } }],
+          [{
+            text: "View specs",
+            options: {
+              hyperlink: { url: String(p.pdfUrl || p.specPdfUrl) },
+              color: brand.accent,
+              underline: { style: "heavy" }, // <-- FIXED: was 'true'
+              fontSize: 14,
+            },
+          }],
           { x: L.rightPane.x, y: L.rightTableY + 1.0, w: L.rightPane.w, h: 0.5, align: "center", fontFace: "Inter" } as any
         );
       }
