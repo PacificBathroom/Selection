@@ -7,7 +7,7 @@ import workerSrc from "pdfjs-dist/build/pdf.worker.mjs?url";
 import * as pdfjsLib from "pdfjs-dist";
 (pdfjsLib as any).GlobalWorkerOptions.workerSrc = workerSrc;
 
-// Call the Netlify proxy to bypass CORS on images / PDFs
+// Netlify function proxy (mapped by netlify.toml)
 const PROXY = (u: string) => `/api/pdf-proxy?url=${encodeURIComponent(u)}`;
 
 /* ------------------------------ helpers ------------------------------ */
@@ -45,11 +45,11 @@ const str = (v: unknown) => {
 async function fetchAsDataUrl(url?: string): Promise<string | undefined> {
   if (!url) return undefined;
 
-  const toDataUrlFromBlob = async (res: Response) => {
+  const toDataUrlFromResponse = async (res: Response) => {
     const ct = res.headers.get("content-type") || "application/octet-stream";
     const blob = await res.blob();
-    // Try the safe path: read blob → dataURL
     try {
+      // Normal path: blob → data: URL
       const dataUrl = await new Promise<string>((resolve) => {
         const fr = new FileReader();
         fr.onload = () => resolve(String(fr.result));
@@ -57,23 +57,27 @@ async function fetchAsDataUrl(url?: string): Promise<string | undefined> {
       });
       return dataUrl;
     } catch {
-      // Fallback: if the function returned base64 text, stitch it manually
+      // If the proxy already returned base64 text, stitch it manually
       const text = await res.text().catch(() => "");
-      if (text) return `data:${ct};base64,${text}`;
-      return undefined;
+      return text ? `data:${ct};base64,${text}` : undefined;
     }
   };
 
   // Try through our proxy
   try {
-    const res = await fetch(PROXY(url));
-    if (res.ok) return await toDataUrlFromBlob(res);
+    const res = await fetch(PROXY(url), {
+      // Be generous: some origins are picky
+      headers: {
+        "Accept": "*/*",
+      },
+    });
+    if (res.ok) return await toDataUrlFromResponse(res);
   } catch {}
 
   // Fallback: try direct (may hit CORS)
   try {
     const res = await fetch(url, { mode: "cors" });
-    if (res.ok) return await toDataUrlFromBlob(res);
+    if (res.ok) return await toDataUrlFromResponse(res);
   } catch {}
 
   return undefined;
@@ -172,7 +176,7 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
     text: "0F172A",
     accent: "1E6BD7",
     faint: "F1F5F9",
-    bar: "24D3EE",
+    bar: "19C5B7",            // teal footer as per your sample
     zebra: ["F8FAFC", "FFFFFF"],
   };
 
@@ -195,19 +199,18 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
     }
   }
 
-  // Layout constants
+  // Layout (nudged to keep everything safely on-slide)
   const L = {
-    leftImg:   { x: 0.6, y: 1.0, w: 5.0, h: 3.6 },
-    rightPane: { x: 6.0, y: 1.0, w: 3.6, h: 3.9 },
-    rightTitle:{ x: 6.0, y: 1.0, w: 3.6, h: 0.7 },
-    rightSku:  { x: 6.0, y: 1.7, w: 3.6, h: 0.4 },
-    rightTableY: 2.2,
-    descBox:   { x: 0.6, y: 4.45, w: 9.0, h: 0.55 },
-    bottomBar: { x: 0.0, y: 5.30, w: 10.0, h: 0.23 },
-    codeText:  { x: 0.7, y: 5.05, w: 4.5, h: 0.25 },
+    leftImg:   { x: 0.6,  y: 1.0,  w: 5.0, h: 3.6 },
+    rightPane: { x: 6.0,  y: 1.0,  w: 3.6, h: 3.9 },
+    rightTitle:{ x: 6.0,  y: 1.0,  w: 3.6, h: 0.7 },
+    rightSku:  { x: 6.0,  y: 1.7,  w: 3.6, h: 0.45 },
+    rightTableY: 2.25,
+    descBox:   { x: 0.6,  y: 4.20, w: 9.0, h: 0.70 },  // moved up + taller
+    bottomBar: { x: 0.0,  y: 5.10, w: 10.0, h: 0.30 }, // moved up a bit
+    codeText:  { x: 0.7,  y: 4.88, w: 4.5, h: 0.30 },  // above the bar
   };
 
-  // Slides
   for (const row of rows as unknown as Record<string, any>[]) {
     const title =
       str(getField(row, ["Name", "Product", "Title"])) ||
@@ -244,8 +247,10 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
     const s = pptx.addSlide();
     s.background = { color: brand.bg };
 
-    // Left image
-    const imgData = await fetchAsDataUrl(imageUrl);
+    // Left image (with PDF preview fallback)
+    let imgData = await fetchAsDataUrl(imageUrl);
+    if (!imgData && pdfUrl) imgData = await pdfFirstPageToPng(pdfUrl);
+
     if (imgData) {
       s.addImage({ data: imgData, ...L.leftImg, sizing: { type: "contain", w: L.leftImg.w, h: L.leftImg.h } } as any);
     } else {
@@ -267,7 +272,7 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
           options: {
             hyperlink: pdfUrl ? { url: String(pdfUrl) } : undefined,
             color: brand.accent,
-            underline: true,               // <-- boolean, avoids TS error
+            underline: true,     // boolean avoids TS issues on Netlify build
             fontSize: 14,
           },
         }] as any),
@@ -283,11 +288,10 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
       ]));
       s.addTable(rowsData as any, {
         x: L.rightPane.x, y: L.rightTableY, w: L.rightPane.w, colW: [1.6, 2.0],
-        border: { style: "none" } as any,   // cast to keep TS quiet
+        border: { style: "none" } as any,
         margin: 0.04,
       } as any);
     } else if (pdfUrl) {
-      // Try a PDF preview if we have a spec sheet
       const thumb = await pdfFirstPageToPng(pdfUrl);
       if (thumb) {
         const h = L.rightPane.h - (L.rightTableY - L.rightPane.y);
@@ -296,7 +300,6 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
           sizing: { type: "contain", w: L.rightPane.w, h },
         } as any);
       } else {
-        // Placeholder + link
         s.addShape(pptx.ShapeType.roundRect, {
           x: L.rightPane.x, y: L.rightTableY, w: L.rightPane.w, h: L.rightPane.h - (L.rightTableY - L.rightPane.y),
           fill: { color: brand.faint }, line: { color: "E2E8F0", width: 1 },
@@ -307,21 +310,25 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
         );
       }
     } else {
-      // No specs at all
       s.addShape(pptx.ShapeType.roundRect, {
         x: L.rightPane.x, y: L.rightTableY, w: L.rightPane.w, h: L.rightPane.h - (L.rightTableY - L.rightPane.y),
         fill: { color: brand.faint }, line: { color: "E2E8F0", width: 1 },
       } as any);
     }
 
-    // Description
+    // Description (kept within slide; auto-shrinks if long)
     if (description) {
       s.addText(description, {
-        ...L.descBox, align: "center", fontFace: "Inter", fontSize: 13, color: "344054", fit: "shrink",
+        ...L.descBox,
+        align: "center",
+        fontFace: "Inter",
+        fontSize: 13,
+        color: "344054",
+        fit: "shrink",
       } as any);
     }
 
-    // Bottom bar + code label
+    // Footer bar + code label
     s.addShape(pptx.ShapeType.rect, { ...L.bottomBar, fill: { color: brand.bar }, line: { color: brand.bar } } as any);
     if (code) {
       s.addText(code, { ...L.codeText, fontFace: "Inter", fontSize: 12, color: "111111" } as any);
