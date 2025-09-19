@@ -285,7 +285,7 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
             options: {
               hyperlink: pdfUrl ? { url: pdfUrl } : undefined,
               color: brand.accent,
-              underline: "sng", // pptxgenjs v3.x: "sng" = single underline
+              underline: { style: "sng" }, // <-- object form
               fontSize: 14,
             },
           },
@@ -324,7 +324,7 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
               options: {
                 hyperlink: { url: pdfUrl },
                 color: brand.accent,
-                underline: "sng", // was "single"
+                underline: { style: "sng" }, // <-- object form
                 fontSize: 14,
               },
             },
