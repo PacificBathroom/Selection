@@ -1,6 +1,16 @@
 // src/api/sheets.ts
 import type { Product } from "../types";
 
+export async function fetchProducts(params?: { q?: string; category?: string }): Promise<Product[]> {
+  const qs = new URLSearchParams(params as any).toString();
+  const url = "/.netlify/functions/products" + (qs ? `?${qs}` : "");
+
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`Products fetch failed (${resp.status})`);
+  const data = (await resp.json()) as { items: Product[] };
+  return data.items ?? [];
+}
+
 export type ProductRow = Product;
 
 export interface ProductFilter {
