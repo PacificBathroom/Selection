@@ -8,6 +8,14 @@ const CORS = {
 };
 
 exports.handler = async (event) => {
+  // Preflight/HEAD
+  if (event.httpMethod === "OPTIONS") {
+    return { statusCode: 204, headers: CORS };
+  }
+  if (event.httpMethod === "HEAD") {
+    return { statusCode: 200, headers: CORS };
+  }
+
   try {
     const url = event.queryStringParameters && event.queryStringParameters.url;
     if (!url || !/^https?:\/\//i.test(url)) {
