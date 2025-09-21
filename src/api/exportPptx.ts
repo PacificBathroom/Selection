@@ -130,16 +130,6 @@ async function fetchImageAsPngDataUrl(originalUrl?: string): Promise<string | un
       dlog("fetch", via, res.status, "for", u);
       return undefined;
     }
-// Example pattern — adjust to your exact API call:
-const img = product.imageUrl ?? (product as any).image ?? (product as any).thumbnail;
-if (img) {
-  slides.addImage(img); // only when we have a real string
-}
-
-// Likewise for PDF/file names, text, etc.:
-if (product.pdfUrl) {
-  deck.addLink(product.pdfUrl);
-}
 
     const ct = res.headers.get("content-type") || "";
     dlog("fetch", via, "content-type:", ct);
@@ -336,7 +326,6 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
 
     const specs = toSpecPairs(row);
 
-    // 🔎 debug line you asked for (+ a bit more if specs are empty)
     dlog({ title, code, imageUrl, pdfUrl, specsCount: specs.length, hasDesc: !!description });
     if (!specs.length) dlog("no specs found; row keys:", Object.keys(row));
 
@@ -354,7 +343,7 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
     if (imgData) {
       s.addImage({ data: imgData, ...L.img, sizing: { type: "contain", w: L.img.w, h: L.img.h } } as any);
     } else {
-      s.addShape(pptx.ShapeType.roundRect, {
+      s.addShape(PptxGenJS.ShapeType.roundRect, {
         ...L.img, fill: { color: brand.faint }, line: { color: "D0D7E2", width: 1 },
       } as any);
     }
@@ -368,7 +357,7 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
             options: {
               hyperlink: pdfUrl ? { url: pdfUrl } : undefined,
               color: brand.accent,
-              underline: { style: "sng" }, // pptxgenjs typing prefers an object
+              underline: { style: "sng" } as any,
               fontSize: 14,
             },
           },
@@ -396,29 +385,27 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
           sizing: { type: "contain", w: L.rightPane.w, h },
         } as any);
       } else {
-        s.addShape(pptx.ShapeType.roundRect, {
+        s.addShape(PptxGenJS.ShapeType.roundRect, {
           x: L.rightPane.x, y: L.tableY, w: L.rightPane.w, h: L.rightPane.h - (L.tableY - L.rightPane.y),
           fill: { color: brand.faint }, line: { color: "E2E8F0", width: 1 },
         } as any);
-        if (pdfUrl) {
-          s.addText(
-            [
-              {
-                text: "View specs",
-                options: {
-                  hyperlink: { url: pdfUrl },
-                  color: brand.accent,
-                  underline: { style: "sng" },
-                  fontSize: 14,
-                },
+        s.addText(
+          [
+            {
+              text: "View specs",
+              options: {
+                hyperlink: pdfUrl ? { url: pdfUrl } : undefined,
+                color: brand.accent,
+                underline: { style: "sng" } as any,
+                fontSize: 14,
               },
-            ],
-            { x: L.rightPane.x, y: L.tableY + 1.0, w: L.rightPane.w, h: 0.5, align: "center", fontFace: "Inter" } as any
-          );
-        }
+            },
+          ],
+          { x: L.rightPane.x, y: L.tableY + 1.0, w: L.rightPane.w, h: 0.5, align: "center", fontFace: "Inter" } as any
+        );
       }
     } else {
-      s.addShape(pptx.ShapeType.roundRect, {
+      s.addShape(PptxGenJS.ShapeType.roundRect, {
         x: L.rightPane.x, y: L.tableY, w: L.rightPane.w, h: L.rightPane.h - (L.tableY - L.rightPane.y),
         fill: { color: brand.faint }, line: { color: "E2E8F0", width: 1 },
       } as any);
@@ -432,7 +419,7 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
     }
 
     // Footer bar + code again (subtle branding)
-    s.addShape(pptx.ShapeType.rect, { ...L.bar, fill: { color: brand.bar }, line: { color: brand.bar } } as any);
+    s.addShape(PptxGenJS.ShapeType.rect, { ...L.bar, fill: { color: brand.bar }, line: { color: brand.bar } } as any);
     if (code) {
       s.addText(code, { ...L.barText, fontFace: "Inter", fontSize: 12, color: "0B3A33", align: "left" } as any);
     }
