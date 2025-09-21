@@ -1,6 +1,34 @@
 // netlify/functions/pdf-proxy.js
 // A tiny fetch proxy for images/PDFs so the browser can read cross-origin files.
 // Usage: /api/pdf-proxy?url=<encoded URL>
+// netlify/functions/pdf-proxy.ts
+import type { Handler } from "@netlify/functions";
+
+export const handler: Handler = async (event) => {
+  const url = event.queryStringParameters?.url;
+  if (!url) return { statusCode: 400, body: "Missing ?url" };
+
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return { statusCode: res.status, body: `Fetch failed: ${res.status}` };
+
+    const ct = res.headers.get("content-type") || "application/octet-stream";
+    const buf = Buffer.from(await res.arrayBuffer());
+
+    return {
+      statusCode: 200,
+      headers: {
+        "content-type": ct,
+        "cache-control": "public, max-age=86400",
+        "access-control-allow-origin": "*",
+      },
+      body: buf.toString("base64"),
+      isBase64Encoded: true,
+    };
+  } catch (e) {
+    return { statusCode: 500, body: `Proxy error: ${(e as Error).message}` };
+  }
+};
 
 export async function handler(event) {
   try {
