@@ -1,4 +1,6 @@
 // src/api/exportPptx.ts
+console.log("[pptx] exporter version: 2025-09-21-a");
+
 // Product selection → PPTX exporter (PptxGenJS)
 // - Fetches images via Netlify proxy
 // - Coerces non-jpeg/png (webp/gif/svg/unknown) to PNG in-browser
