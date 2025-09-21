@@ -69,9 +69,7 @@ function findImageInHtml(html: string, baseUrl: string): string | undefined {
 
     const firstImg = doc.querySelector("img[src]") as HTMLImageElement | null;
     if (firstImg?.src) return new URL(firstImg.src, baseUrl).toString();
-  } catch {
-    // ignore
-  }
+  } catch {}
   return undefined;
 }
 
@@ -97,8 +95,8 @@ async function pdfFirstPageToPng(pdfUrl?: string): Promise<string | undefined> {
 }
 
 // Fetch any URL -> **PNG data URL**
-// Tries (a) proxying the original; if HTML, scrape an image; if PDF, render page 1;
-// then (b) direct HTTPS for plain images.
+// (a) proxy original; if HTML, scrape image; if PDF, render page 1
+// (b) else try direct HTTPS for plain images.
 async function fetchImageAsPngDataUrl(originalUrl?: string): Promise<string | undefined> {
   if (!originalUrl) return undefined;
 
@@ -152,7 +150,6 @@ async function fetchImageAsPngDataUrl(originalUrl?: string): Promise<string | un
       if (discovered) {
         dlog("scraped image:", discovered);
         try {
-          // re-fetch the discovered image via proxy so CORS/http are handled
           const again = await tryFetch(PROXY(discovered), "proxy");
           if (again) return again;
         } catch {}
@@ -163,7 +160,6 @@ async function fetchImageAsPngDataUrl(originalUrl?: string): Promise<string | un
     return undefined;
   }
 
-  // 1) Proxy original URL (handles http + CORS and lets us see HTML/PDF)
   try {
     const viaProxy = await tryFetch(PROXY(originalUrl), "proxy");
     if (viaProxy) return viaProxy;
@@ -171,7 +167,6 @@ async function fetchImageAsPngDataUrl(originalUrl?: string): Promise<string | un
     dlog("proxy fetch failed:", e);
   }
 
-  // 2) Direct HTTPS (images only)
   try {
     const https = originalUrl.replace(/^http:\/\//i, "https://");
     if (/^https:\/\//i.test(https)) {
@@ -198,9 +193,17 @@ function toSpecPairs(row: Record<string, any>): Array<[string, string]> {
     }
   }
 
-  // Long text form (explicitly include your "SpecsBullets" column)
+  // Long text forms: include "SpecsBullets" explicitly
   const long =
-    str(getField(row, ["SpecsBullets", "Specifications", "Specs", "Product Details", "Details", "Features", "Notes"])) ||
+    str(getField(row, [
+      "SpecsBullets",
+      "Specifications",
+      "Specs",
+      "Product Details",
+      "Details",
+      "Features",
+      "Notes",
+    ])) ||
     str((row as any).specifications) ||
     str((row as any).specs) ||
     str((row as any).SpecsBullets);
@@ -209,23 +212,24 @@ function toSpecPairs(row: Record<string, any>): Array<[string, string]> {
     for (const part of long.split(/\r?\n|[|•]/).map((s) => s.trim()).filter(Boolean)) {
       const m = part.match(/^(.+?)\s*[:\-–]\s*(.+)$/);
       if (m) pairs.push([m[1].trim(), m[2].trim()]);
-      else pairs.push(["", part]);
+      else pairs.push(["", part]); // items without ":" become single-value rows
       if (pairs.length >= 12) break;
     }
   }
 
-  // Header/value columns fall-back
+  // Header/value fall-back
   if (!pairs.length) {
     const SPECY = [
-      "Material", "Finish", "Mounting", "Features", "Options", "Dimensions",
-      "Size", "Capacity", "Power", "Model", "Warranty", "Colour", "Color",
+      "Material","Finish","Mounting","Features","Options","Dimensions",
+      "Size","Capacity","Power","Model","Warranty","Colour","Color",
     ].map(norm);
 
     for (const key of Object.keys(row)) {
       const nk = norm(key);
       if (
         ["name","product","title","code","sku","image","imageurl","photo","thumbnail","url","link",
-         "pdf","pdfurl","specpdfurl","description","desc","shortdescription","longdescription","specsbullets"].includes(nk)
+         "pdf","pdfurl","specpdfurl","description","desc","shortdescription","longdescription","specsbullets"]
+          .includes(nk)
       ) continue;
 
       const val = String(row[key] ?? "").trim();
@@ -251,10 +255,10 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
 
   const brand = {
     bg: "FFFFFF",
-    text: "0F172A",    // slate-900
-    accent: "1E6BD7",  // link blue
-    faint: "F1F5F9",   // slate-100
-    bar: "24D3EE",     // footer bar
+    text: "0F172A",
+    accent: "1E6BD7",
+    faint: "F1F5F9",
+    bar: "24D3EE",
     zebra: ["F8FAFC", "FFFFFF"],
   };
 
@@ -290,7 +294,7 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
   };
 
   for (const row of rows as unknown as Record<string, any>[]) {
-    // Resolve row fields (accept lots of header variations; also unwraps =IMAGE())
+    // Resolve row fields
     const title =
       str(getField(row, ["Name", "Product", "Title"])) ||
       str((row as any).name) ||
@@ -346,7 +350,7 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
       fontFace: "Inter", fontSize: 22, bold: true, color: brand.text, align: "center", fit: "shrink",
     } as any);
 
-    // Left image (proxy handles http + CORS; HTML/PDF fallbacks handled)
+    // Left image
     const imgData = await fetchImageAsPngDataUrl(imageUrl);
     if (imgData) {
       s.addImage({ data: imgData, ...L.img, sizing: { type: "contain", w: L.img.w, h: L.img.h } } as any);
@@ -365,7 +369,7 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
             options: {
               hyperlink: pdfUrl ? { url: pdfUrl } : undefined,
               color: brand.accent,
-              underline: { style: "sng" } as any, // pptxgenjs typing expects an object
+              underline: { style: "sng" } as any,
               fontSize: 14,
             },
           },
@@ -426,7 +430,7 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
       } as any);
     }
 
-    // Footer bar + code again (subtle branding)
+    // Footer bar + code again
     s.addShape(PptxGenJS.ShapeType.rect, { ...L.bar, fill: { color: brand.bar }, line: { color: brand.bar } } as any);
     if (code) {
       s.addText(code, { ...L.barText, fontFace: "Inter", fontSize: 12, color: "0B3A33", align: "left" } as any);
