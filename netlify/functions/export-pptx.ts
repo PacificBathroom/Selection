@@ -2,7 +2,7 @@
 import type { Handler } from "@netlify/functions";
 import PptxGenJS from "pptxgenjs";
 
-// If you have real types, you can import them; keeping it loose for safety.
+// Loose shapes so we work with whatever your sheet sends
 type Row = Record<string, unknown>;
 type ClientInfo = {
   projectName?: string;
@@ -13,12 +13,15 @@ type ClientInfo = {
   contactPhone?: string;
 };
 
+// -----------------------------
+// helpers
+// -----------------------------
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 const str = (v: unknown) => (v == null ? undefined : String(v).trim() || undefined);
 const ensureHttps = (u?: string) =>
   u?.startsWith("http://") ? u.replace(/^http:\/\//i, "https://") : u;
 
-// IMAGE("…") un-wrapper
+// unwrap =IMAGE("https://...") from Google Sheets
 function extractUrlFromImageFormula(v: unknown): string | undefined {
   if (typeof v !== "string") return undefined;
   const t = v.trim();
@@ -28,6 +31,7 @@ function extractUrlFromImageFormula(v: unknown): string | undefined {
   return m?.[1];
 }
 
+// case/space-insensitive lookup with IMAGE() unwrapping
 function getField<T = unknown>(row: Record<string, any>, aliases: string[]): T | undefined {
   const want = aliases.map(norm);
   for (const k of Object.keys(row)) {
@@ -40,10 +44,11 @@ function getField<T = unknown>(row: Record<string, any>, aliases: string[]): T |
   return undefined;
 }
 
-// Very forgiving spec extraction
+// build up to 10 spec pairs from many shapes of input
 function toSpecPairs(row: Record<string, any>): Array<[string, string]> {
   const pairs: Array<[string, string]> = [];
 
+  // explicit [{label,value}] array
   if (Array.isArray(row.specs)) {
     for (const it of row.specs as Array<{ label?: string; value?: string }>) {
       const label = String(it?.label ?? "").trim();
@@ -52,6 +57,7 @@ function toSpecPairs(row: Record<string, any>): Array<[string, string]> {
     }
   }
 
+  // long “bullet list” fields
   const long =
     str(getField(row, [
       "Specifications", "Specs", "Product Details", "Details", "Features",
@@ -69,6 +75,7 @@ function toSpecPairs(row: Record<string, any>): Array<[string, string]> {
     }
   }
 
+  // Spec 1..12 or Feature 1..12 columns
   if (!pairs.length) {
     for (let i = 1; i <= 12; i++) {
       const v =
@@ -80,6 +87,7 @@ function toSpecPairs(row: Record<string, any>): Array<[string, string]> {
     }
   }
 
+  // fall back to short columns (skip obvious non-specs)
   if (!pairs.length) {
     const skip = new Set([
       "name","product","title","code","sku","image","imageurl","photo","thumbnail","picture",
@@ -98,7 +106,7 @@ function toSpecPairs(row: Record<string, any>): Array<[string, string]> {
   return pairs.slice(0, 10);
 }
 
-// Node 18+/20+ global fetch is available on Netlify
+// server-side image fetch -> data URL (avoids CORS)
 async function fetchImageDataUrl(url?: string): Promise<string | undefined> {
   if (!url) return undefined;
   const safe = ensureHttps(url)!;
@@ -120,6 +128,9 @@ async function fetchImageDataUrl(url?: string): Promise<string | undefined> {
   }
 }
 
+// -----------------------------
+// Netlify handler
+// -----------------------------
 export const handler: Handler = async (event) => {
   if (event.httpMethod !== "POST") {
     return { statusCode: 405, body: "Use POST" };
@@ -167,7 +178,7 @@ export const handler: Handler = async (event) => {
     }
   }
 
-  // Layout
+  // Layout constants
   const L = {
     title:     { x: 0.5, y: 0.5, w: 9.0, h: 0.7 },
     img:       { x: 0.5, y: 1.0, w: 5.2, h: 3.7 },
@@ -223,7 +234,7 @@ export const handler: Handler = async (event) => {
       fontFace: "Inter", fontSize: 22, bold: true, color: brand.text, align: "center", fit: "shrink",
     } as any);
 
-    // Image (server-side fetch -> data URL)
+    // Product image (server-side fetch -> base64 data URL)
     const imgData = await fetchImageDataUrl(imageUrl);
     if (imgData) {
       s.addImage({ data: imgData, ...L.img, sizing: { type: "contain", w: L.img.w, h: L.img.h } } as any);
@@ -233,7 +244,7 @@ export const handler: Handler = async (event) => {
       } as any);
     }
 
-    // Code/SKU (link to PDF if present)
+    // Code/SKU with link to PDF (if present)
     if (code) {
       s.addText(
         [{ text: code, options: { hyperlink: pdfUrl ? { url: pdfUrl } : undefined, color: brand.accent, underline: { style: "sng" }, fontSize: 14 } }],
@@ -241,7 +252,7 @@ export const handler: Handler = async (event) => {
       );
     }
 
-    // Specs table → else placeholder + "View specs" link
+    // Specs table, else placeholder + "View specs" link
     if (specs.length) {
       const rowsData = specs.map(([label, value], i) => ([
         { text: label || "", options: { bold: true, fontSize: 12, fill: { color: brand.zebra[i % 2] } } },
@@ -271,14 +282,14 @@ export const handler: Handler = async (event) => {
       } as any);
     }
 
-    // Footer bar
+    // Footer bar + code again
     s.addShape(pptx.ShapeType.rect, { ...L.bar, fill: { color: brand.bar }, line: { color: brand.bar } } as any);
     if (code) {
       s.addText(code, { ...L.barText, fontFace: "Inter", fontSize: 12, color: "0B3A33", align: "left" } as any);
     }
   }
 
-  // Return a file download
+  // produce Node buffer and return as download
   const buf = await pptx.write("nodebuffer");
   const fname =
     (client.projectName?.replace(/[^\w\-]+/g, " ").trim() || "Project Selection") + ".pptx";
