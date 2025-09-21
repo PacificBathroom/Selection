@@ -77,9 +77,9 @@ function toProductFromExactHeaders(
     typeof specsBullets === "string" ? specsBullets : undefined;
 
   const productName = name ? String(name) : undefined;
-  const id =
-    String(code ?? url ?? productName ?? `row-${idx + 2}`) // +2 because header row is A1
-      .trim();
+  const id = String(code ?? url ?? productName ?? `row-${idx + 2}`).trim();
+return { id, ...rest };
+
 
   const product: Product = {
     // stable id so React/UI and exporter don’t crash
