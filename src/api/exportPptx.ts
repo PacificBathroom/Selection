@@ -1,7 +1,7 @@
 // src/api/exportPptx.ts
 import PptxGenJS from "pptxgenjs";
 import type { Product, ClientInfo } from "../types";
-import { exportSelectionToPptx as exportPptx } from "../api/exportPptx";
+
 // PDF.js worker (only used for PDF thumbnails)
 import workerSrc from "pdfjs-dist/build/pdf.worker.mjs?url";
 import * as pdfjsLib from "pdfjs-dist";
@@ -10,7 +10,7 @@ import * as pdfjsLib from "pdfjs-dist";
 // -------------------------------------------------------------
 // Settings
 // -------------------------------------------------------------
-const SHOW_PDF_THUMBS = true;
+const SHOW_PDF_THUMBS = true; // set false if your proxy has trouble with PDFs
 const PROXY = (u: string) => `/api/pdf-proxy?url=${encodeURIComponent(u)}`;
 
 // -------------------------------------------------------------
@@ -81,7 +81,7 @@ async function fetchImageAsPngDataUrl(originalUrl?: string): Promise<string | un
     const res = await fetch(u);
     if (!res.ok) return undefined;
     const blob = await res.blob();
-    if (blob.type && !blob.type.startsWith("image/")) return undefined;
+    if (blob.type && !blob.type.startsWith("image/")) return undefined; // ignore HTML, etc.
     const dataUrl = await blobToDataURL(blob);
     return toPng(dataUrl);
   }
@@ -153,19 +153,24 @@ function toSpecPairs(row: Record<string, any>): Array<[string, string]> {
     }
   }
 
-  // Header/value columns
+  // Header/value columns (fallback)
   if (!pairs.length) {
     const SPECY = [
       "Material", "Finish", "Mounting", "Features", "Options", "Dimensions",
-      "Size", "Capacity", "Power", "Model", "Warranty", "Colour", "Color"
+      "Size", "Capacity", "Power", "Model", "Warranty", "Colour", "Color",
     ].map(norm);
 
     for (const key of Object.keys(row)) {
       const nk = norm(key);
       if (
-        ["name","product","title","code","sku","image","imageurl","photo","thumbnail","url","link",
-         "pdf","pdfurl","specpdfurl","description","desc","shortdescription","longdescription"].includes(nk)
-      ) continue;
+        [
+          "name","product","title","code","sku","image","imageurl","photo","thumbnail","picture","imagelink","mainimage",
+          "url","link","pdf","pdfurl","specpdfurl","datasheet","brochure",
+          "description","desc","shortdescription","longdescription",
+        ].includes(nk)
+      ) {
+        continue;
+      }
 
       const val = String(row[key] ?? "").trim();
       if (!val) continue;
@@ -190,10 +195,10 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
 
   const brand = {
     bg: "FFFFFF",
-    text: "0F172A",
-    accent: "1E6BD7",
-    faint: "F1F5F9",
-    bar: "24D3EE",
+    text: "0F172A",    // slate-900
+    accent: "1E6BD7",  // link blue
+    faint: "F1F5F9",   // slate-100
+    bar: "24D3EE",     // footer bar
     zebra: ["F8FAFC", "FFFFFF"],
   };
 
@@ -229,6 +234,7 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
   };
 
   for (const row of rows as unknown as Record<string, any>[]) {
+    // Resolve row fields (accepts lots of header variations, incl. IMAGE())
     const title =
       str(getField(row, ["Name", "Product", "Title"])) ||
       str((row as any).name) ||
@@ -272,7 +278,7 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
       fontFace: "Inter", fontSize: 22, bold: true, color: brand.text, align: "center", fit: "shrink",
     } as any);
 
-    // Left image
+    // Left image (proxy fetch -> data URL -> re-encode as PNG)
     const imgData = await fetchImageAsPngDataUrl(imageUrl);
     if (imgData) {
       s.addImage({ data: imgData, ...L.img, sizing: { type: "contain", w: L.img.w, h: L.img.h } } as any);
@@ -285,12 +291,17 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
     // Code/SKU (hyperlink to PDF if present)
     if (code) {
       s.addText(
-        [{ text: code, options: {
-            hyperlink: pdfUrl ? { url: pdfUrl } : undefined,
-            color: brand.accent,
-            underline: { style: "sng" }, // pptxgenjs typing expects object
-            fontSize: 14,
-          } }],
+        [
+          {
+            text: code,
+            options: {
+              hyperlink: pdfUrl ? { url: pdfUrl } : undefined,
+              color: brand.accent,
+              underline: { style: "sng" }, // correct typing for pptxgenjs
+              fontSize: 14,
+            },
+          },
+        ] as any,
         { ...L.sku, fontFace: "Inter", fontSize: 14, align: "left" } as any
       );
     }
@@ -309,20 +320,27 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
       const thumb = await pdfFirstPageToPng(pdfUrl);
       if (thumb) {
         const h = L.rightPane.h - (L.tableY - L.rightPane.y);
-        s.addImage({ data: thumb, x: L.rightPane.x, y: L.tableY, w: L.rightPane.w, h,
-          sizing: { type: "contain", w: L.rightPane.w, h } } as any);
+        s.addImage({
+          data: thumb, x: L.rightPane.x, y: L.tableY, w: L.rightPane.w, h,
+          sizing: { type: "contain", w: L.rightPane.w, h },
+        } as any);
       } else {
         s.addShape(pptx.ShapeType.roundRect, {
           x: L.rightPane.x, y: L.tableY, w: L.rightPane.w, h: L.rightPane.h - (L.tableY - L.rightPane.y),
           fill: { color: brand.faint }, line: { color: "E2E8F0", width: 1 },
         } as any);
         s.addText(
-          [{ text: "View specs", options: {
-              hyperlink: { url: pdfUrl },
-              color: brand.accent,
-              underline: { style: "sng" },
-              fontSize: 14,
-            } }],
+          [
+            {
+              text: "View specs",
+              options: {
+                hyperlink: { url: pdfUrl },
+                color: brand.accent,
+                underline: { style: "sng" },
+                fontSize: 14,
+              },
+            },
+          ] as any,
           { x: L.rightPane.x, y: L.tableY + 1.0, w: L.rightPane.w, h: 0.5, align: "center", fontFace: "Inter" } as any
         );
       }
@@ -333,7 +351,7 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
       } as any);
     }
 
-    // Description
+    // Description (shrink to fit)
     if (description) {
       s.addText(description, {
         ...L.desc, align: "center", fontFace: "Inter", fontSize: 13, color: "344054", fit: "shrink",
