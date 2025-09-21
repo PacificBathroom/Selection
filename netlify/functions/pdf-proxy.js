@@ -1,20 +1,20 @@
-// netlify/functions/pdf-proxy.ts
-import type { Handler } from "@netlify/functions";
+// netlify/functions/pdf-proxy.js
+// Classic Netlify Function (CommonJS). No imports/TypeScript.
 
 const CORS = {
-  "access-control-allow-origin": "*",
-  "access-control-allow-methods": "GET,HEAD,OPTIONS",
-  "access-control-allow-headers": "Content-Type, Range",
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Range",
 };
 
-export const handler: Handler = async (event) => {
-  const url = event.queryStringParameters?.url?.trim();
-  if (!url || !/^https?:\/\//i.test(url)) {
-    return { statusCode: 400, headers: CORS, body: "Missing or invalid ?url=" };
-  }
-
+exports.handler = async (event) => {
   try {
-    const upstream = await fetch(url, {
+    const url = event.queryStringParameters && event.queryStringParameters.url;
+    if (!url || !/^https?:\/\//i.test(url)) {
+      return { statusCode: 400, headers: CORS, body: "Missing or invalid ?url=" };
+    }
+
+    const resp = await fetch(url, {
       redirect: "follow",
       headers: {
         "User-Agent":
@@ -24,32 +24,28 @@ export const handler: Handler = async (event) => {
       },
     });
 
-    if (!upstream.ok) {
+    if (!resp.ok) {
       return {
-        statusCode: upstream.status,
-        headers: { ...CORS, "content-type": "text/plain" },
-        body: `Upstream error ${upstream.status}`,
+        statusCode: resp.status,
+        headers: { ...CORS, "Content-Type": "text/plain" },
+        body: `Upstream error ${resp.status}`,
       };
     }
 
-    const type = upstream.headers.get("content-type") || "application/octet-stream";
-    const buf = Buffer.from(await upstream.arrayBuffer());
+    const contentType = resp.headers.get("content-type") || "application/octet-stream";
+    const buffer = Buffer.from(await resp.arrayBuffer());
 
     return {
       statusCode: 200,
       headers: {
         ...CORS,
-        "content-type": type,
-        "cache-control": "public, max-age=3600",
+        "Content-Type": contentType,
+        "Cache-Control": "public, max-age=3600",
       },
-      body: buf.toString("base64"),
+      body: buffer.toString("base64"),
       isBase64Encoded: true,
     };
-  } catch (err: any) {
-    return {
-      statusCode: 502,
-      headers: { ...CORS, "content-type": "text/plain" },
-      body: `Proxy error: ${err?.message || err}`,
-    };
+  } catch {
+    return { statusCode: 502, headers: CORS, body: "Proxy fetch failed" };
   }
 };
