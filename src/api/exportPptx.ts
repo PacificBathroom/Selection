@@ -2,16 +2,15 @@
 import PptxGenJS from "pptxgenjs";
 import type { Product, ClientInfo } from "../types";
 
-// PDF.js worker (only used for PDF thumbnails)
-import workerSrc from "pdfjs-dist/build/pdf.worker.mjs?url";
-import * as pdfjsLib from "pdfjs-dist";
-(pdfjsLib as any).GlobalWorkerOptions.workerSrc = workerSrc;
-
 // -------------------------------------------------------------
 // Settings
 // -------------------------------------------------------------
-const SHOW_PDF_THUMBS = true; // set false if your proxy has trouble with PDFs
-const PROXY = (u: string) => `/api/pdf-proxy?url=${encodeURIComponent(u)}`;
+// Use the Netlify function you created earlier:
+const PROXY = (rawUrl: string) =>
+  `/.netlify/functions/file-proxy?url=${encodeURIComponent(rawUrl)}`;
+
+// Turn off PDF thumbnails for stability (you can re-enable later if you want)
+const SHOW_PDF_THUMBS = false;
 
 // Simple console tracer
 const DEBUG = true;
@@ -48,257 +47,94 @@ function getField<T = unknown>(row: Record<string, any>, aliases: string[]): T |
   return undefined;
 }
 
-function blobToDataURL(blob: Blob): Promise<string> {
-  return new Promise((resolve) => {
-    const fr = new FileReader();
-    fr.onload = () => resolve(String(fr.result));
-    fr.readAsDataURL(blob);
-  });
-}
-
-// Parse HTML to discover a likely image (og:image, link[rel=image_src], first <img>)
-function findImageInHtml(html: string, baseUrl?: string): string | undefined {
-  try {
-    const doc = new DOMParser().parseFromString(html, "text/html");
-
-    // Make a URL absolute if we can; otherwise return it as-is.
-    const abs = (u: string) => {
-      try {
-        return baseUrl ? new URL(u, baseUrl).toString() : u;
-      } catch {
-        return u;
-      }
-    };
-
-    const og = doc.querySelector('meta[property="og:image"][content]') as HTMLMetaElement | null;
-    if (og?.content) return abs(og.content);
-
-    const linkImg = doc.querySelector('link[rel="image_src"][href]') as HTMLLinkElement | null;
-    if (linkImg?.href) return abs(linkImg.href);
-
-    const firstImg = doc.querySelector("img[src]") as HTMLImageElement | null;
-    if (firstImg?.src) return abs(firstImg.src);
-  } catch {
-    // ignore parse errors
-  }
-  return undefined;
-}
-
-// First page of a PDF -> PNG data URL (through proxy). Falls back to undefined.
-async function pdfFirstPageToPng(pdfUrl?: string): Promise<string | undefined> {
-  if (!pdfUrl || !SHOW_PDF_THUMBS) return undefined;
-  try {
-    dlog("pdfFirstPageToPng:", pdfUrl);
-    const doc = await (pdfjsLib as any).getDocument({ url: PROXY(pdfUrl), useSystemFonts: true }).promise;
-    const page = await doc.getPage(1);
-    const viewport = page.getViewport({ scale: 1.35 });
-    const canvas = document.createElement("canvas");
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return undefined;
-    canvas.width = viewport.width;
-    canvas.height = viewport.height;
-    await page.render({ canvasContext: ctx, viewport }).promise;
-    return canvas.toDataURL("image/png");
-  } catch (e) {
-    dlog("pdfFirstPageToPng failed:", e);
+async function fetchAsDataUrl(rawUrl?: string): Promise<string | undefined> {
+  if (!rawUrl) return undefined;
+  const res = await fetch(PROXY(rawUrl));
+  if (!res.ok) {
+    dlog("proxy fetch failed", res.status, rawUrl);
     return undefined;
   }
-}
-
-// Fetch any URL -> **PNG data URL**
-// (a) proxy original; if HTML, scrape image; if PDF, render page 1
-// (b) else try direct HTTPS for plain images.
-async function fetchImageAsPngDataUrl(originalUrl?: string): Promise<string | undefined> {
-  if (!originalUrl) return undefined;
-
-  async function toPng(dataUrl: string): Promise<string | undefined> {
-    return await new Promise<string | undefined>((resolve) => {
-      const img = new Image();
-      img.onload = () => {
-        try {
-          const canvas = document.createElement("canvas");
-          canvas.width = img.naturalWidth || img.width;
-          canvas.height = img.naturalHeight || img.height;
-          const ctx = canvas.getContext("2d");
-          if (!ctx) return resolve(undefined);
-          ctx.drawImage(img, 0, 0);
-          resolve(canvas.toDataURL("image/png"));
-        } catch (e) {
-          dlog("toPng failed:", e);
-          resolve(undefined);
-        }
-      };
-      img.onerror = () => resolve(undefined);
-      img.src = dataUrl;
-    });
-  }
-  const PROXY = (rawUrl: string) =>
-  `/.netlify/functions/file-proxy?url=${encodeURIComponent(rawUrl)}`;
-
-// If you had PDF thumbnails on, turn them off for now—they’re heavier and fail more often.
-const SHOW_PDF_THUMBS = false;
-
-async function fetchAsDataUrl(rawUrl: string): Promise<string> {
-  const res = await fetch(PROXY(rawUrl));
-  if (!res.ok) throw new Error(`Proxy ${res.status} for ${rawUrl}`);
   const contentType = res.headers.get("content-type") ?? "application/octet-stream";
-  const b64 = await res.text(); // the function returns base64 text
+  const b64 = await res.text(); // function returns base64 text
   return `data:${contentType};base64,${b64}`;
 }
 
-// … inside your export loop:
-if (product.imageUrl) {
-  try {
-    const dataUrl = await fetchAsDataUrl(product.imageUrl);
-    slide.addImage({
-      data: dataUrl,                  // ← use base64 data URL, not path
-      x: 0.6, y: 1.6, w: 6.5, h: 4.0,
-      sizing: { type: "contain", w: 6.5, h: 4.0 },
-    });
-  } catch (e) {
-    // optional: draw a placeholder box/text
-  }
-}
+/**
+ * Build a simple bullet list (array of lines) from flexible row shapes:
+ * - "SpecsBullets" | "Specifications" | "Features" etc (multi-line or | or •)
+ * - An array field "specs" of strings or {label,value}
+ * - Fallback: short key/value fields become "Label: value"
+ */
+function toBulletLines(row: Record<string, any>): string[] {
+  const lines: string[] = [];
 
-
-  async function tryFetch(u: string, via: "proxy" | "direct"): Promise<string | undefined> {
-    const res = await fetch(u);
-    if (!res.ok) {
-      dlog("fetch", via, res.status, "for", u);
-      return undefined;
-    }
-
-    const ct = res.headers.get("content-type") || "";
-    dlog("fetch", via, "content-type:", ct);
-
-    if (ct.startsWith("image/")) {
-      const blob = await res.blob();
-      const dataUrl = await blobToDataURL(blob);
-      return toPng(dataUrl);
-    }
-
-    if (ct.startsWith("application/pdf")) {
-      const page1 = await pdfFirstPageToPng(originalUrl);
-      if (page1) return page1;
-      return undefined;
-    }
-
-    if (ct.includes("text/html")) {
-      const html = await res.text();
-      const discovered = findImageInHtml(html, originalUrl);
-      if (discovered) {
-        dlog("scraped image:", discovered);
-        try {
-          const again = await tryFetch(PROXY(discovered), "proxy");
-          if (again) return again;
-        } catch {}
+  // 1) Array forms
+  const anySpecs = (row as any).specs;
+  if (Array.isArray(anySpecs)) {
+    for (const it of anySpecs) {
+      if (typeof it === "string") {
+        const s = it.trim();
+        if (s) lines.push(s);
+      } else if (it && typeof it === "object") {
+        const label = String((it as any).label ?? "").trim();
+        const value = String((it as any).value ?? "").trim();
+        const combo = [label, value].filter(Boolean).join(": ").trim();
+        if (combo) lines.push(combo);
       }
-      return undefined;
-    }
-
-    return undefined;
-  }
-
-  try {
-    const viaProxy = await tryFetch(PROXY(originalUrl), "proxy");
-    if (viaProxy) return viaProxy;
-  } catch (e) {
-    dlog("proxy fetch failed:", e);
-  }
-
-  try {
-    const https = originalUrl.replace(/^http:\/\//i, "https://");
-    if (/^https:\/\//i.test(https)) {
-      const direct = await tryFetch(https, "direct");
-      if (direct) return direct;
-    }
-  } catch (e) {
-    dlog("direct fetch failed:", e);
-  }
-
-  return undefined;
-}
-
-// Build up to 12 spec rows from various shapes of input
-function toSpecPairs(row: Record<string, any>): Array<[string, string]> {
-  const pairs: Array<[string, string]> = [];
-
-  // Array form: [{ label, value }]
-  if (Array.isArray((row as any).specs)) {
-    for (const it of (row as any).specs as Array<{ label?: string; value?: string }>) {
-      const label = String(it?.label ?? "").trim();
-      const value = String(it?.value ?? "").trim();
-      if (label || value) pairs.push([label, value]);
     }
   }
 
-  // Long text forms: include "SpecsBullets" explicitly
+  // 2) Long text forms
   const long =
-    str(getField(row, [
-      "SpecsBullets",
-      "Specifications",
-      "Specs",
-      "Product Details",
-      "Details",
-      "Features",
-      "Notes",
-    ])) ||
+    str(getField(row, ["SpecsBullets","Specifications","Specs","Product Details","Details","Features","Notes"])) ||
     str((row as any).specifications) ||
     str((row as any).specs) ||
     str((row as any).SpecsBullets);
 
-  if (!pairs.length && long) {
+  if (long) {
     for (const part of long.split(/\r?\n|[|•]/).map((s) => s.trim()).filter(Boolean)) {
-      const m = part.match(/^(.+?)\s*[:\-–]\s*(.+)$/);
-      if (m) pairs.push([m[1].trim(), m[2].trim()]);
-      else pairs.push(["", part]); // items without ":" become single-value rows
-      if (pairs.length >= 12) break;
+      lines.push(part);
+      if (lines.length >= 12) break;
     }
   }
 
-  // Header/value fall-back
-  if (!pairs.length) {
-    const SPECY = [
-      "Material","Finish","Mounting","Features","Options","Dimensions",
-      "Size","Capacity","Power","Model","Warranty","Colour","Color",
-    ].map(norm);
-
+  // 3) Short key/value fallback (skip obvious non-spec keys)
+  if (!lines.length) {
+    const SKIP = new Set(
+      ["name","product","title","code","sku","image","imageurl","photo","thumbnail","url","link",
+       "pdf","pdfurl","specpdfurl","description","desc","shortdescription","longdescription","specsbullets"]
+      .map(norm)
+    );
     for (const key of Object.keys(row)) {
       const nk = norm(key);
-      if (
-        ["name","product","title","code","sku","image","imageurl","photo","thumbnail","url","link",
-         "pdf","pdfurl","specpdfurl","description","desc","shortdescription","longdescription","specsbullets"]
-          .includes(nk)
-      ) continue;
-
+      if (SKIP.has(nk)) continue;
       const val = String(row[key] ?? "").trim();
       if (!val) continue;
-
-      if (SPECY.includes(nk) || val.length <= 120) {
-        pairs.push([key.replace(/\s+/g, " ").trim(), val]);
+      if (val.length <= 120) {
+        lines.push(`${key.replace(/\s+/g, " ").trim()}: ${val}`);
       }
-      if (pairs.length >= 12) break;
+      if (lines.length >= 12) break;
     }
   }
 
-  return pairs.slice(0, 12);
+  return lines.slice(0, 12);
 }
 
 // -------------------------------------------------------------
-// PPT Export
+// PPT Export (matches your screenshot layout)
 // -------------------------------------------------------------
 export async function exportSelectionToPptx(rows: Product[], client: ClientInfo) {
   const pptx = new PptxGenJS();
   pptx.layout = "LAYOUT_16x9";
   pptx.title = client.projectName || "Product Presentation";
 
+  // Palette
   const brand = {
     bg: "FFFFFF",
     text: "0F172A",
     accent: "1E6BD7",
     faint: "F1F5F9",
     bar: "24D3EE",
-    zebra: ["F8FAFC", "FFFFFF"],
   };
 
   // Cover
@@ -320,156 +156,78 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
     }
   }
 
-  // Layout (16x9 slide height ~5.63")
+  // Layout (16x9 height ~5.63")
   const L = {
-    title:     { x: 0.5, y: 0.5, w: 9.0, h: 0.7 },
-    img:       { x: 0.5, y: 1.0, w: 5.2, h: 3.7 },      // image LEFT
-    rightPane: { x: 6.0, y: 1.0, w: 3.5, h: 3.9 },      // specs RIGHT
-    sku:       { x: 6.0, y: 1.6, w: 3.5, h: 0.4 },
-    tableY:    2.1,
-    desc:      { x: 0.6, y: 4.8, w: 8.8, h: 0.48 },
-    bar:       { x: 0.0, y: 5.30, w: 10.0, h: 0.30 },
-    barText:   { x: 0.6, y: 5.04, w: 8.8, h: 0.25 },
+    title:   { x: 0.5, y: 0.5, w: 9.0, h: 0.7 },
+    img:     { x: 0.5, y: 1.1, w: 5.2, h: 3.7 },  // image LEFT
+    specs:   { x: 6.0, y: 1.1, w: 3.5, h: 3.9 },  // bullet list RIGHT
+    desc:    { x: 0.6, y: 4.9, w: 8.8, h: 0.48 },
+    bar:     { x: 0.0, y: 5.30, w: 10.0, h: 0.30 },
+    barText: { x: 0.6, y: 5.04, w: 8.8, h: 0.25 },
   };
 
   for (const row of rows as unknown as Record<string, any>[]) {
-    // Resolve row fields
+    // Resolve fields
     const title =
-      str(getField(row, ["Name", "Product", "Title"])) ||
-      str((row as any).name) ||
-      str((row as any).product) ||
-      "Untitled Product";
+      str(getField(row, ["Name","Product","Title"])) ||
+      str((row as any).name) || str((row as any).product) || "Untitled Product";
 
     const description =
-      str(getField(row, ["Description", "Desc", "Summary", "Long Description", "Short Description"])) ||
-      str((row as any).description) ||
-      str((row as any).longDescription) ||
-      str((row as any).shortDescription) ||
-      undefined;
+      str(getField(row, ["Description","Desc","Summary","Long Description","Short Description"])) ||
+      str((row as any).description) || str((row as any).longDescription) || str((row as any).shortDescription);
 
     const code =
-      str(getField(row, ["Code", "SKU", "Model", "Item", "Product Code"])) ||
-      str((row as any).code) ||
-      str((row as any).sku) ||
-      undefined;
+      str(getField(row, ["Code","SKU","Model","Item","Product Code"])) ||
+      str((row as any).code) || str((row as any).sku);
 
     const imageUrl =
       str(getField(row, ["ImageURL","Image URL","Image","Photo","Thumbnail","Picture","Image Link","Main Image"])) ||
-      str((row as any).imageUrl) ||
-      str((row as any).image) ||
-      str((row as any).thumbnail) ||
-      undefined;
+      str((row as any).imageUrl) || str((row as any).image) || str((row as any).thumbnail);
 
-    // PDF: prefer explicit columns, otherwise use URL only if it looks like a PDF
-    const explicitPdf =
-      str(getField(row, ["PDF URL","PdfURL","Spec PDF","Spec Sheet","Datasheet","Brochure"])) ||
-      str((row as any).pdfUrl) ||
-      str((row as any).specPdfUrl);
+    const bullets = toBulletLines(row);
 
-    const urlOrLink =
-      str(getField(row, ["URL", "Url", "Link"])) ||
-      str((row as any).url) ||
-      str((row as any).link);
-
-    const pdfUrl =
-      explicitPdf ??
-      (urlOrLink && /\.pdf(\?|#|$)/i.test(urlOrLink) ? urlOrLink : undefined);
-
-    const specs = toSpecPairs(row);
-
-    dlog({ title, code, imageUrl, pdfUrl, specsCount: specs.length, hasDesc: !!description });
-    if (!specs.length) dlog("no specs found; row keys:", Object.keys(row));
+    dlog({ title, code, imageUrl, bullets: bullets.length });
 
     const s = pptx.addSlide();
     s.background = { color: brand.bg };
 
-    // Title
+    // Title (centered)
     s.addText(title, {
       ...L.title,
       fontFace: "Inter", fontSize: 22, bold: true, color: brand.text, align: "center", fit: "shrink",
     } as any);
 
-    // Left image
-    const imgData = await fetchImageAsPngDataUrl(imageUrl);
-    if (imgData) {
-      s.addImage({ data: imgData, ...L.img, sizing: { type: "contain", w: L.img.w, h: L.img.h } } as any);
+    // Left image (via proxy → base64 data URL)
+    const dataUrl = await fetchAsDataUrl(imageUrl);
+    if (dataUrl) {
+      s.addImage({ data: dataUrl, ...L.img, sizing: { type: "contain", w: L.img.w, h: L.img.h } } as any);
     } else {
+      // light placeholder if image fails
       s.addShape(PptxGenJS.ShapeType.roundRect, {
         ...L.img, fill: { color: brand.faint }, line: { color: "D0D7E2", width: 1 },
       } as any);
+      s.addText("Image unavailable", {
+        x: L.img.x, y: L.img.y + L.img.h/2 - 0.2, w: L.img.w, h: 0.4,
+        align: "center", fontFace: "Inter", fontSize: 12, color: "667085",
+      } as any);
     }
 
-    // Code/SKU (hyperlinked to PDF if present)
-    if (code) {
+    // Right bullets (this mirrors your screenshot)
+    if (bullets.length) {
       s.addText(
-        [
-          {
-            text: code,
-            options: {
-              hyperlink: pdfUrl ? { url: pdfUrl } : undefined,
-              color: brand.accent,
-              underline: { style: "sng" } as any,
-              fontSize: 14,
-            },
-          },
-        ],
-        { ...L.sku, fontFace: "Inter", fontSize: 14, align: "left" } as any
+        bullets.map((b) => `• ${b}`).join("\n"),
+        { ...L.specs, fontSize: 12, fontFace: "Inter", color: "111827" } as any
       );
     }
 
-    // Right side: specs table → or PDF thumbnail → or placeholder+link
-    if (specs.length) {
-      const rowsData = specs.map(([label, value], i) => ([
-        { text: label || "", options: { bold: true, fontSize: 12, fill: { color: brand.zebra[i % 2] } } },
-        { text: value || "", options: { fontSize: 12, fill: { color: brand.zebra[i % 2] } } },
-      ]));
-      s.addTable(rowsData as any, {
-        x: L.rightPane.x, y: L.tableY, w: L.rightPane.w, colW: [1.5, 2.0],
-        border: { style: "none" }, margin: 0.04,
-      } as any);
-    } else if (pdfUrl) {
-      const thumb = await pdfFirstPageToPng(pdfUrl);
-      if (thumb) {
-        const h = L.rightPane.h - (L.tableY - L.rightPane.y);
-        s.addImage({
-          data: thumb, x: L.rightPane.x, y: L.tableY, w: L.rightPane.w, h,
-          sizing: { type: "contain", w: L.rightPane.w, h },
-        } as any);
-      } else {
-        s.addShape(PptxGenJS.ShapeType.roundRect, {
-          x: L.rightPane.x, y: L.tableY, w: L.rightPane.w, h: L.rightPane.h - (L.tableY - L.rightPane.y),
-          fill: { color: brand.faint }, line: { color: "E2E8F0", width: 1 },
-        } as any);
-        s.addText(
-          [
-            {
-              text: "View specs",
-              options: {
-                hyperlink: pdfUrl ? { url: pdfUrl } : undefined,
-                color: brand.accent,
-                underline: { style: "sng" } as any,
-                fontSize: 14,
-              },
-            },
-          ],
-          { x: L.rightPane.x, y: L.tableY + 1.0, w: L.rightPane.w, h: 0.5, align: "center", fontFace: "Inter" } as any
-        );
-      }
-    } else {
-      s.addShape(PptxGenJS.ShapeType.roundRect, {
-        x: L.rightPane.x, y: L.tableY, w: L.rightPane.w, h: L.rightPane.h - (L.tableY - L.rightPane.y),
-        fill: { color: brand.faint }, line: { color: "E2E8F0", width: 1 },
-      } as any);
-    }
-
-    // Description
+    // Description along the bottom
     if (description) {
       s.addText(description, {
-        ...L.desc, align: "center", fontFace: "Inter", fontSize: 13, color: "344054", fit: "shrink",
+        ...L.desc, align: "center", fontFace: "Inter", fontSize: 12, color: "344054", fit: "shrink",
       } as any);
     }
 
-    // Footer bar + code again
+    // Footer bar + code (optional)
     s.addShape(PptxGenJS.ShapeType.rect, { ...L.bar, fill: { color: brand.bar }, line: { color: brand.bar } } as any);
     if (code) {
       s.addText(code, { ...L.barText, fontFace: "Inter", fontSize: 12, color: "0B3A33", align: "left" } as any);
