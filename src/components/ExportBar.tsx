@@ -22,6 +22,7 @@ export default function ExportBar() {
         return;
       }
       await exportPptx(products, client);
+      await exportPptxV2(selectedRows, clientInfo);
     } catch (e: any) {
       console.error(e);
       alert(`Export failed: ${e?.message || e}`);
@@ -63,6 +64,12 @@ export default function ExportBar() {
           placeholder="Phone"
           value={client.contactPhone ?? ""}
           onChange={e => setClient(c => ({ ...c, contactPhone: e.target.value }))}
+          />
+        <input
+          className="border p-2"
+          placeholder="Product Name"
+          value={Precero.Name ?? ""}
+          onChange={e => set{Precero(c => ({ ...c, PreceroName: e.target.value }))}
         />
       </div>
 
