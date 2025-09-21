@@ -1,36 +1,24 @@
 // src/api/exportPptx.ts
-
-// --- Helpers PptxGenJS needs for base64 images -----------------------------
-function toPptxBase64Header(dataUrl: string): string {
-  // Accept either "data:image/png;base64,..." or "image/png;base64,..."
-  let s = (dataUrl || "").trim();
-  if (s.startsWith("data:")) s = s.slice(5); // remove "data:"
-  // Coerce unknown type to a real image header so PPTX accepts it
-  if (s.startsWith("application/octet-stream;base64,")) {
-    s = "image/jpeg;base64," + s.split("base64,")[1];
-  }
-  return s;
-}
+// Product selection → PPTX exporter (PptxGenJS)
+// - Fetches images via Netlify proxy
+// - Coerces non-jpeg/png (webp/gif/svg/unknown) to PNG in-browser
+// - Provides visible error text on slide if an image cannot be embedded
 
 import PptxGenJS from "pptxgenjs";
 import type { Product, ClientInfo } from "../types";
 
-// -------------------------------------------------------------
+// -----------------------------------------------------------------------------
 // Settings
-// -------------------------------------------------------------
+// -----------------------------------------------------------------------------
 const PROXY = (rawUrl: string) =>
   `/.netlify/functions/file-proxy?url=${encodeURIComponent(rawUrl)}`;
 
-// If you later add PDF thumbs, wire them separately; keeping off for stability.
-const SHOW_PDF_THUMBS = false;
-
-// Simple console tracer
 const DEBUG = true;
 const dlog = (...a: any[]) => DEBUG && console.log("[pptx]", ...a);
 
-// -------------------------------------------------------------
-// Generic helpers
-// -------------------------------------------------------------
+// -----------------------------------------------------------------------------
+// Small helpers
+// -----------------------------------------------------------------------------
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 const str = (v: unknown) => {
   if (v == null) return undefined;
@@ -59,25 +47,77 @@ function getField<T = unknown>(row: Record<string, any>, aliases: string[]): T |
   return undefined;
 }
 
-// Netlify proxy -> base64 data URL (ensure an image/* content-type)
-async function fetchAsDataUrl(rawUrl?: string): Promise<string | undefined> {
-  if (!rawUrl) return undefined;
-  const res = await fetch(PROXY(rawUrl));
-  if (!res.ok) {
-    dlog("proxy fetch failed", res.status, rawUrl);
-    return undefined;
-  }
+// Normalize common URL oddities from spreadsheets
+function normalizeImageUrl(u?: string): string | undefined {
+  if (!u) return undefined;
+  let s = String(u).trim();
+  s = s.replace(/^"+|"+$/g, "");   // strip wrapping quotes
+  if (s.startsWith("//")) s = "https:" + s;
+  s = s.replace(/\s/g, "%20");     // spaces → %20
+  return s;
+}
+
+// Convert ANY browser data URL to PNG data URL (handles webp/gif/svg/etc.)
+async function dataUrlToPngDataUrl(dataUrl: string): Promise<string> {
+  return await new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = img.naturalWidth || img.width || 1;
+        canvas.height = img.naturalHeight || img.height || 1;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return resolve(dataUrl);
+        ctx.drawImage(img, 0, 0);
+        resolve(canvas.toDataURL("image/png")); // always PNG after this
+      } catch {
+        resolve(dataUrl);
+      }
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
+  });
+}
+
+// Fetch via Netlify proxy → browser dataURL; coerce to PNG/JPEG if needed
+async function fetchAsDataUrl(
+  rawUrl?: string
+): Promise<{ ok: boolean; dataUrl?: string; msg?: string }> {
+  const url = normalizeImageUrl(rawUrl);
+  if (!url) return { ok: false, msg: "no image url" };
+
+  const res = await fetch(PROXY(url));
+  if (!res.ok) return { ok: false, msg: `proxy ${res.status}` };
+
   let ct = (res.headers.get("content-type") || "").toLowerCase();
-  const b64 = await res.text(); // function returns base64 text
-  if (!ct.startsWith("image/")) ct = "image/jpeg"; // coerce if needed
-  return `data:${ct};base64,${b64}`;
+  const b64 = await res.text();
+
+  if (!ct.startsWith("image/")) ct = "image/jpeg"; // coerce if unknown
+  let dataUrl = `data:${ct};base64,${b64}`;
+
+  // If not jpeg/png, convert to PNG (handles webp/gif/svg etc.)
+  if (!(ct.startsWith("image/png") || ct.startsWith("image/jpeg"))) {
+    dataUrl = await dataUrlToPngDataUrl(dataUrl);
+  }
+  return { ok: true, dataUrl };
+}
+
+// PptxGenJS wants 'image/<type>;base64,...' (no 'data:' prefix)
+function toPptxBase64Header(dataUrl: string): string {
+  let s = (dataUrl || "").trim();
+  if (s.startsWith("data:")) s = s.slice(5); // strip 'data:'
+  if (s.startsWith("application/octet-stream;base64,")) {
+    s = "image/jpeg;base64," + s.split("base64,")[1];
+  }
+  return s;
 }
 
 /**
- * Build a simple bullet list (array of lines) from flexible row shapes:
- * - "SpecsBullets" | "Specifications" | "Features" etc (multi-line or | or •)
- * - An array field "specs" of strings or {label,value}
- * - Fallback: short key/value fields become "Label: value"
+ * Build bullet lines from flexible shapes:
+ *  - "SpecsBullets" | "Specifications" | "Features" etc (multi-line or | or •)
+ *  - Array field "specs" of strings or {label,value}
+ *  - Fallback: short key/value fields -> "Label: value"
  */
 function toBulletLines(row: Record<string, any>): string[] {
   const lines: string[] = [];
@@ -134,15 +174,14 @@ function toBulletLines(row: Record<string, any>): string[] {
   return lines.slice(0, 12);
 }
 
-// -------------------------------------------------------------
-// PPT Export (matches your screenshot layout)
-// -------------------------------------------------------------
+// -----------------------------------------------------------------------------
+// PPT Export (layout matches your example)
+// -----------------------------------------------------------------------------
 export async function exportSelectionToPptx(rows: Product[], client: ClientInfo) {
   const pptx = new PptxGenJS();
   pptx.layout = "LAYOUT_16x9";
   pptx.title = client.projectName || "Product Presentation";
 
-  // Palette
   const brand = {
     bg: "FFFFFF",
     text: "0F172A",
@@ -195,8 +234,13 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
       str((row as any).code) || str((row as any).sku);
 
     const imageUrl =
-      str(getField(row, ["ImageURL","Image URL","Image","Photo","Thumbnail","Picture","Image Link","Main Image"])) ||
-      str((row as any).imageUrl) || str((row as any).image) || str((row as any).thumbnail);
+      str(getField(row, [
+        "ImageURL","Image URL","Image","Photo","Thumbnail","Picture",
+        "Image Link","Main Image","MainImage","Primary Image","Image Src","ImageSrc"
+      ])) ||
+      str((row as any).imageUrl) ||
+      str((row as any).image) ||
+      str((row as any).thumbnail);
 
     const bullets = toBulletLines(row);
 
@@ -211,20 +255,30 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
       fontFace: "Inter", fontSize: 22, bold: true, color: brand.text, align: "center", fit: "shrink",
     } as any);
 
-    // Left image (via proxy → base64 data URL)
-    const dataUrl = await fetchAsDataUrl(imageUrl);
-    if (dataUrl) {
-      s.addImage({
-        data: toPptxBase64Header(dataUrl),
-        ...L.img,
-        sizing: { type: "contain", w: L.img.w, h: L.img.h },
-      } as any);
+    // Left image (proxy → base64 → ensure PNG/JPEG → addImage)
+    const im = await fetchAsDataUrl(imageUrl);
+    if (im.ok && im.dataUrl) {
+      const header = toPptxBase64Header(im.dataUrl);
+      if (!/^image\/(png|jpeg);base64,/i.test(header)) {
+        // Visible reason if weird header survives conversion
+        s.addShape(PptxGenJS.ShapeType.roundRect, { ...L.img, fill: { color: brand.faint } } as any);
+        s.addText("Image format not supported", {
+          x: L.img.x, y: L.img.y + L.img.h / 2 - 0.2, w: L.img.w, h: 0.4,
+          align: "center", fontFace: "Inter", fontSize: 12, color: "667085",
+        } as any);
+      } else {
+        s.addImage({
+          data: header,
+          ...L.img,
+          sizing: { type: "contain", w: L.img.w, h: L.img.h },
+        } as any);
+      }
     } else {
-      // light placeholder if image fails
+      // Placeholder + visible reason helps you fix the row fast
       s.addShape(PptxGenJS.ShapeType.roundRect, {
         ...L.img, fill: { color: brand.faint }, line: { color: "D0D7E2", width: 1 },
       } as any);
-      s.addText("Image unavailable", {
+      s.addText(`Image unavailable (${im.msg || "unknown"})`, {
         x: L.img.x, y: L.img.y + L.img.h / 2 - 0.2, w: L.img.w, h: 0.4,
         align: "center", fontFace: "Inter", fontSize: 12, color: "667085",
       } as any);
