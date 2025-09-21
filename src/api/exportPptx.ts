@@ -1,13 +1,8 @@
 // src/api/exportPptx.ts
 console.log("[pptx] exporter version: 2025-09-21-a");
-
-// Product selection → PPTX exporter (PptxGenJS)
-// - Fetches images via Netlify proxy
-// - Coerces non-jpeg/png (webp/gif/svg/unknown) to PNG in-browser
-// - Provides visible error text on slide if an image cannot be embedded
-
 import PptxGenJS from "pptxgenjs";
 import type { Product, ClientInfo } from "../types";
+
 
 // -----------------------------------------------------------------------------
 // Settings
@@ -80,6 +75,12 @@ async function dataUrlToPngDataUrl(dataUrl: string): Promise<string> {
     img.onerror = () => resolve(dataUrl);
     img.src = dataUrl;
   });
+}
+// e.g., src/components/ExportButton.tsx (or wherever you trigger it)
+import { exportPptx } from "@/api/exportPptx"; // or "../api/exportPptx" if you don't use "@/"
+
+async function handleExport(selectedRows: Product[], client: ClientInfo) {
+  await exportPptx(selectedRows, client);
 }
 
 // Fetch via Netlify proxy → browser dataURL; coerce to PNG/JPEG if needed
