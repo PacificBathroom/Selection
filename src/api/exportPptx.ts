@@ -57,18 +57,27 @@ function blobToDataURL(blob: Blob): Promise<string> {
 }
 
 // Parse HTML to discover a likely image (og:image, link[rel=image_src], first <img>)
-function findImageInHtml(html: string, baseUrl: string): string | undefined {
+function findImageInHtml(html: string, baseUrl?: string): string | undefined {
   try {
     const doc = new DOMParser().parseFromString(html, "text/html");
 
     const og = doc.querySelector('meta[property="og:image"][content]') as HTMLMetaElement | null;
-    if (og?.content) return new URL(og.content, baseUrl).toString();
+    if (og?.content) {
+      try { return new URL(og.content, baseUrl).toString(); } catch {}
+      return og.content;
+    }
 
     const linkImg = doc.querySelector('link[rel="image_src"][href]') as HTMLLinkElement | null;
-    if (linkImg?.href) return new URL(linkImg.href, baseUrl).toString();
+    if (linkImg?.href) {
+      try { return new URL(linkImg.href, baseUrl).toString(); } catch {}
+      return linkImg.href;
+    }
 
     const firstImg = doc.querySelector("img[src]") as HTMLImageElement | null;
-    if (firstImg?.src) return new URL(firstImg.src, baseUrl).toString();
+    if (firstImg?.src) {
+      try { return new URL(firstImg.src, baseUrl).toString(); } catch {}
+      return firstImg.src;
+    }
   } catch {
     // ignore
   }
@@ -279,7 +288,7 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
   // Layout (16x9 slide height ~5.63")
   const L = {
     title:     { x: 0.5, y: 0.5, w: 9.0, h: 0.7 },
-    img:       { x: 0.5, y: 1.0, w: 5.2, h: 3.7 },      // image LEFT (your current layout)
+    img:       { x: 0.5, y: 1.0, w: 5.2, h: 3.7 },      // image LEFT
     rightPane: { x: 6.0, y: 1.0, w: 3.5, h: 3.9 },      // specs RIGHT
     sku:       { x: 6.0, y: 1.6, w: 3.5, h: 0.4 },
     tableY:    2.1,
@@ -316,18 +325,19 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
       str((row as any).thumbnail) ||
       undefined;
 
-   // Prefer explicit PDF-ish fields; only fall back to URL/Link if it *looks* like a PDF
-const primaryPdf =
-  str(getField(row, ["PDF URL","PdfURL","Spec PDF","Spec Sheet","Datasheet","Brochure"])) ||
-  str((row as any).pdfUrl) ||
-  str((row as any).specPdfUrl);
+    // Prefer explicit PDF-ish fields; only fall back to URL/Link if it *looks* like a PDF
+    const primaryPdf =
+      str(getField(row, ["PDF URL","PdfURL","PDFUrl","Spec PDF","Spec Sheet","Datasheet","Brochure"])) ||
+      str((row as any).pdfUrl) ||
+      str((row as any).specPdfUrl);
 
-const genericUrl =
-  str((row as any).url) ||
-  str((row as any).link) ||
-  str(getField(row, ["URL","Link"]));
+    const genericUrl =
+      str((row as any).url) ||
+      str((row as any).link) ||
+      str(getField(row, ["URL","Link"]));
 
-const pdfUrl = primaryPdf ?? (genericUrl && /\.pdf(\?|#|$)/i.test(genericUrl) ? genericUrl : undefined);
+    const pdfUrl =
+      primaryPdf ?? (genericUrl && /\.pdf(\?|#|$)/i.test(genericUrl) ? genericUrl : undefined);
 
     const specs = toSpecPairs(row);
 
