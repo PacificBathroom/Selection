@@ -5,27 +5,25 @@ export interface Section {
   products: Product[];  // required
 }
 
-// sections group products for UI/decks
-export interface Section {
-  id?: string;
-  title: string;
-  products: Product[];
-}
-
 export type Product = {
-  id: string;               // stable id for React keys etc.
+  id: string;                 // stable id
+  url?: string;
   code?: string;
-  sku?: string;
   name?: string;
+  imageUrl?: string;
+  description?: string;
+  specs?: string[];           // from SpecsBullets
+  pdfUrl?: string;
   category?: string;
 
-  url?: string;             // product page
-  imageUrl?: string;        // main image
-  thumbnailUrl?: string;    // optional thumbnail
-  pdfUrl?: string;          // brochure / install
-  specPdfUrl?: string;      // detailed specs PDF
-
-  description?: string;
+  contact?: {
+    name?: string;
+    email?: string;
+    phone?: string;
+    address?: string;
+  };
+};
+ description?: string;
   specs?: string[];         // bullet points
   price?: number | null;    // optional numeric
 };
