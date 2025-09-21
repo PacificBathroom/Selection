@@ -10,8 +10,14 @@ import type { Product, ClientInfo } from "../types";
 // -----------------------------------------------------------------------------
 // Settings
 // -----------------------------------------------------------------------------
+// Always call your own site (works even if the app is embedded elsewhere)
+const SITE =
+  (typeof window !== "undefined" && window.location?.origin) ||
+  "https://pacificbathroomselection.netlify.app";
+
 const PROXY = (rawUrl: string) =>
-  `/.netlify/functions/file-proxy?url=${encodeURIComponent(rawUrl)}`;
+  `${SITE}/.netlify/functions/file-proxy?url=${encodeURIComponent(rawUrl)}`;
+
 
 const DEBUG = true;
 const dlog = (...a: any[]) => DEBUG && console.log("[pptx]", ...a);
