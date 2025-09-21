@@ -1,7 +1,7 @@
 // src/api/exportPptx.ts
 import PptxGenJS from "pptxgenjs";
 import type { Product, ClientInfo } from "../types";
-
+import { exportSelectionToPptx as exportPptx } from "../api/exportPptx";
 // PDF.js worker (only used for PDF thumbnails)
 import workerSrc from "pdfjs-dist/build/pdf.worker.mjs?url";
 import * as pdfjsLib from "pdfjs-dist";
