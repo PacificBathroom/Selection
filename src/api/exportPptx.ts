@@ -1,8 +1,14 @@
 // src/api/exportPptx.ts
-console.log("[pptx] exporter version: 2025-09-21-a");
+// Product selection → PPTX exporter (PptxGenJS)
+// - Fetches images via Netlify proxy
+// - Coerces non-jpeg/png (webp/gif/svg/unknown) to PNG in-browser
+// - Shows a visible reason on the slide if an image can’t be embedded
+// - Adds a tiny "NEW exporter v2" stamp on each product slide for verification
+
+console.log("[pptx] exporter version: v2-active");
+
 import PptxGenJS from "pptxgenjs";
 import type { Product, ClientInfo } from "../types";
-
 
 // -----------------------------------------------------------------------------
 // Settings
@@ -75,12 +81,6 @@ async function dataUrlToPngDataUrl(dataUrl: string): Promise<string> {
     img.onerror = () => resolve(dataUrl);
     img.src = dataUrl;
   });
-}
-// e.g., src/components/ExportButton.tsx (or wherever you trigger it)
-import { exportPptx } from "@/api/exportPptx"; // or "../api/exportPptx" if you don't use "@/"
-
-async function handleExport(selectedRows: Product[], client: ClientInfo) {
-  await exportPptx(selectedRows, client);
 }
 
 // Fetch via Netlify proxy → browser dataURL; coerce to PNG/JPEG if needed
@@ -178,7 +178,7 @@ function toBulletLines(row: Record<string, any>): string[] {
 }
 
 // -----------------------------------------------------------------------------
-// PPT Export (layout matches your example)
+// PPT Export (layout: image left, bullets right, description bottom)
 // -----------------------------------------------------------------------------
 export async function exportSelectionToPptx(rows: Product[], client: ClientInfo) {
   const pptx = new PptxGenJS();
@@ -258,6 +258,12 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
       fontFace: "Inter", fontSize: 22, bold: true, color: brand.text, align: "center", fit: "shrink",
     } as any);
 
+    // Visible stamp so you can confirm V2 ran
+    s.addText("NEW exporter v2", {
+      x: 0.15, y: 0.15, w: 2, h: 0.3,
+      fontSize: 10, color: "FF0000", fontFace: "Inter",
+    } as any);
+
     // Left image (proxy → base64 → ensure PNG/JPEG → addImage)
     const im = await fetchAsDataUrl(imageUrl);
     if (im.ok && im.dataUrl) {
@@ -330,5 +336,6 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
   await pptx.writeFile({ fileName: `${client.projectName || "Project Selection"}.pptx` } as any);
 }
 
-// Alias used elsewhere
-export const exportPptx = exportSelectionToPptx;
+// Exports
+export const exportPptxV2 = exportSelectionToPptx;   // preferred (use this in your import)
+export const exportPptx   = exportSelectionToPptx;   // compatibility with old imports
