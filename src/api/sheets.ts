@@ -1,6 +1,6 @@
 // src/api/sheets.ts
 import type { Product } from "../types";
-export type ProductRow = Product; // <-- restore this line
+export type ProductRow = Product;
 
 /* ---------- header-aware helpers for your exact columns ---------- */
 function val(row: Record<string, unknown>, key: string): unknown | undefined {
@@ -23,7 +23,6 @@ function boolish(v: unknown): boolean | undefined {
 
 // Parse "SpecsBullets" like:
 // "WELS 4 Star: 6L/min | Brass Body | Finish - Chrome"
-// → [{label:"WELS 4 Star", value:"6L/min"}, {value:"Brass Body"}, {label:"Finish", value:"Chrome"}]
 function parseSpecsBullets(
   v: unknown
 ): { label?: string; value?: string }[] | undefined {
@@ -58,37 +57,33 @@ function toProductFromExactHeaders(
   idx: number
 ): Product {
   const selected = boolish(val(row, "Select"));
-  const url = val(row, "Url");
+  const url = val(row, "URL");                // <-- exact: URL
   const code = val(row, "Code");
   const name = val(row, "Name");
   const imageURL = val(row, "ImageURL");
   const description = val(row, "Description");
   const specsBullets = val(row, "SpecsBullets");
-  const pdfURL = val(row, "PdfURL");
+  const pdfURL = val(row, "PDFUrl");          // <-- exact: PDFUrl
   const contactName = val(row, "ContactName");
   const contactEmail = val(row, "ContactEmail");
   const contactPhone = val(row, "ContactPhone");
   const contactAddr = val(row, "ContactAddress");
   const category = val(row, "Category");
 
-  // Normalize specs from your "SpecsBullets" column
+  // Normalize specs from "SpecsBullets"
   const specsParsed = parseSpecsBullets(specsBullets);
   const specifications =
     typeof specsBullets === "string" ? specsBullets : undefined;
 
   const productName = name ? String(name) : undefined;
   const id = String(code ?? url ?? productName ?? `row-${idx + 2}`).trim();
-return { id, ...rest };
-
 
   const product: Product = {
-    // stable id so React/UI and exporter don’t crash
     id,
 
     // core
     name: productName,
-    // optional “product” alias used elsewhere in your code
-    product: productName as any,
+    product: productName as any, // legacy alias
     code: code ? String(code) : undefined,
     sku: code ? String(code) : undefined,
     url: url ? String(url) : undefined,
@@ -185,7 +180,7 @@ export async function fetchProducts(
     const needle = q.trim().toLowerCase();
     items = items.filter((p) => {
       const hay = [
-        (p as any).product, // legacy alias
+        (p as any).product,
         p.name,
         p.code,
         (p as any).sku,
