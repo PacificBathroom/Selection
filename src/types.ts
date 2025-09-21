@@ -12,13 +12,24 @@ export interface Section {
   products: Product[];
 }
 
-export interface Product {
-  // identifiers
-  name?: string;
-  product?: string;
+export type Product = {
+  id: string;               // stable id for React keys etc.
   code?: string;
   sku?: string;
-  url?: string;
+  name?: string;
+  category?: string;
+
+  url?: string;             // product page
+  imageUrl?: string;        // main image
+  thumbnailUrl?: string;    // optional thumbnail
+  pdfUrl?: string;          // brochure / install
+  specPdfUrl?: string;      // detailed specs PDF
+
+  description?: string;
+  specs?: string[];         // bullet points
+  price?: number | null;    // optional numeric
+};
+
 
   // media
   imageUrl?: string;
