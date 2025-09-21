@@ -1,4 +1,15 @@
 // src/api/exportPptx.ts
+function toPptxBase64Header(dataUrl: string): string {
+  // Accept either "data:image/png;base64,..." or "image/png;base64,..."
+  let s = dataUrl.trim();
+  if (s.startsWith("data:")) s = s.slice(5);               // remove "data:"
+  // Some hosts reply "application/octet-stream" – force to a real image header for PPTX
+  if (s.startsWith("application/octet-stream;base64,")) {
+    s = "image/jpeg;base64," + s.split("base64,")[1];      // default to jpeg header
+  }
+  return s;
+}
+
 import PptxGenJS from "pptxgenjs";
 import type { Product, ClientInfo } from "../types";
 
