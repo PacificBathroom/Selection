@@ -1,10 +1,12 @@
 [build]
-  command = "npm install --no-audit --no-fund --loglevel verbose && npm run build"
+  command = "npm install && npm run build"
   publish = "dist"
-  functions = "netlify/functions"
+  functions = "netlify/functions"   # adjust if yours is different
 
 [functions]
   node_bundler = "esbuild"
+  included_files = []
+
 
 [[redirects]]
   from = "/api/*"
