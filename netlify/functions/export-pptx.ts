@@ -1,6 +1,9 @@
 // netlify/functions/pdf-proxy.js
 // Classic Netlify Function (CommonJS). No imports/TypeScript.
 
+
+const DEBUG = true;
+const dlog = (...a: any[]) => DEBUG && console.log("[pptx]", ...a);
 const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
