@@ -18,10 +18,13 @@ export const handler: Handler = async (event) => {
       return { statusCode: 400, headers: CORS, body: JSON.stringify({ error: "Missing url" }) };
     }
 
+    // Pretend to be a browser to avoid hotlink blocks; follow redirects.
     const upstream = await fetch(url, {
       redirect: "follow",
-      // Some hosts block generic bots; pretend to be a browser:
-      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120 Safari/537.36" },
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120 Safari/537.36",
+        "Accept": "*/*",
+      },
     });
 
     if (!upstream.ok) {
@@ -38,11 +41,19 @@ export const handler: Handler = async (event) => {
 
     return {
       statusCode: 200,
-      headers: { ...CORS, "Content-Type": contentType, "Cache-Control": "public, max-age=86400" },
+      headers: {
+        ...CORS,
+        "Content-Type": contentType,                // lets the client know the real type
+        "Cache-Control": "public, max-age=86400",   // 1-day cache
+      },
       body: base64,
-      isBase64Encoded: true, // 🔑 without this images break
+      isBase64Encoded: true, // 🔑 without this, images break
     };
   } catch (err: any) {
-    return { statusCode: 500, headers: CORS, body: JSON.stringify({ error: err?.message || "Proxy error" }) };
+    return {
+      statusCode: 500,
+      headers: CORS,
+      body: JSON.stringify({ error: err?.message || "Proxy error" }),
+    };
   }
 };
