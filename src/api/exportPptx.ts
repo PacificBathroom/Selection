@@ -130,6 +130,16 @@ async function fetchImageAsPngDataUrl(originalUrl?: string): Promise<string | un
       dlog("fetch", via, res.status, "for", u);
       return undefined;
     }
+// Example pattern — adjust to your exact API call:
+const img = product.imageUrl ?? (product as any).image ?? (product as any).thumbnail;
+if (img) {
+  slides.addImage(img); // only when we have a real string
+}
+
+// Likewise for PDF/file names, text, etc.:
+if (product.pdfUrl) {
+  deck.addLink(product.pdfUrl);
+}
 
     const ct = res.headers.get("content-type") || "";
     dlog("fetch", via, "content-type:", ct);
