@@ -57,19 +57,30 @@ function blobToDataURL(blob: Blob): Promise<string> {
 }
 
 // Parse HTML to discover a likely image (og:image, link[rel=image_src], first <img>)
-function findImageInHtml(html: string, baseUrl: string): string | undefined {
+function findImageInHtml(html: string, baseUrl?: string): string | undefined {
   try {
     const doc = new DOMParser().parseFromString(html, "text/html");
 
+    // Make a URL absolute if we can; otherwise return it as-is.
+    const abs = (u: string) => {
+      try {
+        return baseUrl ? new URL(u, baseUrl).toString() : u;
+      } catch {
+        return u;
+      }
+    };
+
     const og = doc.querySelector('meta[property="og:image"][content]') as HTMLMetaElement | null;
-    if (og?.content) return new URL(og.content, baseUrl).toString();
+    if (og?.content) return abs(og.content);
 
     const linkImg = doc.querySelector('link[rel="image_src"][href]') as HTMLLinkElement | null;
-    if (linkImg?.href) return new URL(linkImg.href, baseUrl).toString();
+    if (linkImg?.href) return abs(linkImg.href);
 
     const firstImg = doc.querySelector("img[src]") as HTMLImageElement | null;
-    if (firstImg?.src) return new URL(firstImg.src, baseUrl).toString();
-  } catch {}
+    if (firstImg?.src) return abs(firstImg.src);
+  } catch {
+    // ignore parse errors
+  }
   return undefined;
 }
 
