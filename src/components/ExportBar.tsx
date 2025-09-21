@@ -1,75 +1,78 @@
+// src/components/ExportBar.tsx
 import { useState } from "react";
 import { fetchProducts } from "@/api/sheets";
-import { exportPptx } from "@/api/exportPptx";
-import type { ClientInfo, Product } from "@/types";
+import { exportPptxV2 } from "@/api/exportPptx.v2"; // use "../api/exportPptx.v2" if you don't have "@/"
+import type { Product, ClientInfo } from "@/types";
 
-export default function ExportBar() {
+type Props = {
+  /** Optional: pass the ticked items from your list UI */
+  selectedRows?: Product[];
+};
+
+export default function ExportBar({ selectedRows }: Props) {
   const [client, setClient] = useState<ClientInfo>({
     projectName: "",
     clientName: "",
     contactName: "",
     contactEmail: "",
-    contactPhone: ""
+    contactPhone: "",
   });
   const [isExporting, setIsExporting] = useState(false);
 
-  async function onExport() {
+  const onExport = async () => {
     try {
       setIsExporting(true);
-      const products: Product[] = await fetchProducts(); // or your selected subset
-      if (!products.length) {
-        alert("No products found to export.");
+
+      // Use selectedRows when provided; otherwise fetch (or fetch only selected in your fetchProducts)
+      let rows: Product[] =
+        selectedRows && selectedRows.length ? selectedRows : await fetchProducts();
+
+      if (!rows || rows.length === 0) {
+        alert("Select at least one product to export.");
         return;
       }
-      await exportPptx(products, client);
-      await exportPptxV2(selectedRows, clientInfo);
+
+      await exportPptxV2(rows, client);
     } catch (e: any) {
-      console.error(e);
+      console.error("[export] failed:", e);
       alert(`Export failed: ${e?.message || e}`);
     } finally {
       setIsExporting(false);
     }
-  }
+  };
 
   return (
     <div className="flex flex-col gap-3">
-      {/* Your inputs */}
       <div className="grid grid-cols-2 gap-2">
         <input
           className="border p-2"
           placeholder="Project name"
           value={client.projectName ?? ""}
-          onChange={e => setClient(c => ({ ...c, projectName: e.target.value }))}
+          onChange={(e) => setClient((c) => ({ ...c, projectName: e.target.value }))}
         />
         <input
           className="border p-2"
           placeholder="Client name"
           value={client.clientName ?? ""}
-          onChange={e => setClient(c => ({ ...c, clientName: e.target.value }))}
+          onChange={(e) => setClient((c) => ({ ...c, clientName: e.target.value }))}
         />
         <input
           className="border p-2"
           placeholder="Contact name"
           value={client.contactName ?? ""}
-          onChange={e => setClient(c => ({ ...c, contactName: e.target.value }))}
+          onChange={(e) => setClient((c) => ({ ...c, contactName: e.target.value }))}
         />
         <input
           className="border p-2"
           placeholder="Email"
           value={client.contactEmail ?? ""}
-          onChange={e => setClient(c => ({ ...c, contactEmail: e.target.value }))}
+          onChange={(e) => setClient((c) => ({ ...c, contactEmail: e.target.value }))}
         />
         <input
           className="border p-2"
           placeholder="Phone"
           value={client.contactPhone ?? ""}
-          onChange={e => setClient(c => ({ ...c, contactPhone: e.target.value }))}
-          />
-        <input
-          className="border p-2"
-          placeholder="Product Name"
-          value={Precero.Name ?? ""}
-          onChange={e => set{Precero(c => ({ ...c, PreceroName: e.target.value }))}
+          onChange={(e) => setClient((c) => ({ ...c, contactPhone: e.target.value }))}
         />
       </div>
 
