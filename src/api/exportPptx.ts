@@ -2,10 +2,18 @@
 // Product selection → PPTX exporter (PptxGenJS)
 // v2.1 – hardened image handling, visible error text, verification stamp
 
+
 console.log("[pptx] exporter version: v2.1-hard");
 
 import PptxGenJS from "pptxgenjs";
 import type { Product, ClientInfo } from "../types";
+// wherever you trigger export
+import { exportPptx } from "@/api/exportPptx";
+import { exportPptxV2 } from "@/api/exportPptx.v2";
+
+
+await exportPptxV2(selectedRows ?? products, clientInfo);
+
 
 // -----------------------------------------------------------------------------
 // Settings
