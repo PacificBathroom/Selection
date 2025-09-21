@@ -132,6 +132,34 @@ async function fetchImageAsPngDataUrl(originalUrl?: string): Promise<string | un
       img.src = dataUrl;
     });
   }
+  const PROXY = (rawUrl: string) =>
+  `/.netlify/functions/file-proxy?url=${encodeURIComponent(rawUrl)}`;
+
+// If you had PDF thumbnails on, turn them off for now—they’re heavier and fail more often.
+const SHOW_PDF_THUMBS = false;
+
+async function fetchAsDataUrl(rawUrl: string): Promise<string> {
+  const res = await fetch(PROXY(rawUrl));
+  if (!res.ok) throw new Error(`Proxy ${res.status} for ${rawUrl}`);
+  const contentType = res.headers.get("content-type") ?? "application/octet-stream";
+  const b64 = await res.text(); // the function returns base64 text
+  return `data:${contentType};base64,${b64}`;
+}
+
+// … inside your export loop:
+if (product.imageUrl) {
+  try {
+    const dataUrl = await fetchAsDataUrl(product.imageUrl);
+    slide.addImage({
+      data: dataUrl,                  // ← use base64 data URL, not path
+      x: 0.6, y: 1.6, w: 6.5, h: 4.0,
+      sizing: { type: "contain", w: 6.5, h: 4.0 },
+    });
+  } catch (e) {
+    // optional: draw a placeholder box/text
+  }
+}
+
 
   async function tryFetch(u: string, via: "proxy" | "direct"): Promise<string | undefined> {
     const res = await fetch(u);
