@@ -1,4 +1,5 @@
 // src/types.ts
+
 export interface Section {
   id?: string;
   title: string;        // required
@@ -7,58 +8,50 @@ export interface Section {
 
 export type Product = {
   id: string;                 // stable id
+
+  // core fields
   url?: string;
   code?: string;
   name?: string;
-  imageUrl?: string;
-  description?: string;
-  specs?: string[];           // from SpecsBullets
-  pdfUrl?: string;
   category?: string;
 
+  // media
+  imageUrl?: string;          // from ImageURL
+  image?: string;             // optional legacy field
+  thumbnail?: string;         // optional
+
+  // copy
+  description?: string;
+
+  // specs
+  specs?: string[] | { label?: string; value?: string }[];
+  specifications?: string;    // optional text fallback
+
+  // pdf/spec sheets
+  pdfUrl?: string;
+  specPdfUrl?: string;
+
+  // pricing (optional)
+  price?: number | null;
+
+  // contact block (from columns or per-row)
   contact?: {
     name?: string;
     email?: string;
     phone?: string;
     address?: string;
   };
-};
- description?: string;
-  specs?: string[];         // bullet points
-  price?: number | null;    // optional numeric
-};
-
-
-  // media
-  imageUrl?: string;
-  image?: string;
-  thumbnail?: string;
-
-  // copy
-  description?: string;
-
-  // specs
-  specs?: { label?: string; value?: string }[] | string;
-  specifications?: string;
-
-  // pdf/spec sheets
-  pdfUrl?: string;
-  specPdfUrl?: string;
-
-  // category
-  category?: string;
-
-  // per-row contact (optional fallback for slides/UX)
   contactName?: string;
   contactEmail?: string;
   contactPhone?: string;
   contactAddress?: string;
 
-  // selection flag (if you use it)
+  // selection flag (if used in UI)
   selected?: boolean;
 
-  [key: string]: any; // keep flexible
-}
+  // allow extension
+  [key: string]: any;
+};
 
 export interface ClientInfo {
   projectName?: string;
