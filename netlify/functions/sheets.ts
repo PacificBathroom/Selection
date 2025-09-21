@@ -11,28 +11,12 @@ function extractUrlFromImageFormula(v: unknown): string | undefined {
 }
 const normalizeCell = (v: unknown) => extractUrlFromImageFormula(v) ?? v;
 
-function authJWT() {
-  const credsJson = process.env.GOOGLE_CREDENTIALS;
-  if (credsJson) {
-    const creds = JSON.parse(credsJson);
-    return new google.auth.JWT({
-      email: creds.client_email,
-      key: creds.private_key,
-      scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"],
-    });
-  }
-  const email = process.env.GOOGLE_CLIENT_EMAIL!;
-  const keyRaw = process.env.GOOGLE_PRIVATE_KEY!;
-  const key = keyRaw.includes("\\n") ? keyRaw.replace(/\\n/g, "\n") : keyRaw;
-  return new google.auth.JWT({
-    email,
-    key,
+function sheetsClient() {
+  const auth = new google.auth.JWT({
+    email: process.env.GOOGLE_CLIENT_EMAIL,
+    key: (process.env.GOOGLE_PRIVATE_KEY || "").replace(/\\n/g, "\n"),
     scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"],
   });
-}
-
-function sheetsClient() {
-  const auth = authJWT();
   return google.sheets({ version: "v4", auth });
 }
 
@@ -61,10 +45,7 @@ export const handler: Handler = async (event) => {
 
     return {
       statusCode: 200,
-      headers: {
-        "content-type": "application/json",
-        "cache-control": "no-cache",
-      },
+      headers: { "content-type": "application/json" },
       body: JSON.stringify(rows),
     };
   } catch (e: any) {
