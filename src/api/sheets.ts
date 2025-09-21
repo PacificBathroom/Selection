@@ -1,7 +1,7 @@
 // src/api/sheets.ts
 import type { Product } from "../types";
 
-export async function fetchProducts(params?: { q?: string; category?: string }): Promise<Product[]> {
+
   const qs = new URLSearchParams(params as any).toString();
   const url = "/.netlify/functions/products" + (qs ? `?${qs}` : "");
 
