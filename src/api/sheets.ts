@@ -1,5 +1,6 @@
 // src/api/sheets.ts
 import type { Product } from "../types";
+export type ProductRow = Product; // <-- restore this line
 
 /* ---------- header-aware helpers for your exact columns ---------- */
 function val(row: Record<string, unknown>, key: string): unknown | undefined {
