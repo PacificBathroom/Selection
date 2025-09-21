@@ -1,14 +1,13 @@
 // src/api/exportPptx.v2.ts
 console.log("[pptx] exporter version: v2.2-final");
-// Always hit YOUR site (prevents requests going to whatever origin you're on)
+// Always hit YOUR site (prevents requests going to some other origin)
 const SITE =
   (typeof window !== "undefined" && window.location?.origin) ||
-  "https://pacificbathroomselection.netlify.app"; // fallback for SSR/dev
-const PROXY = (rawUrl: string) =>
-  `/.netlify/functions/file-proxy?url=${encodeURIComponent(rawUrl)}`;
+  "https://pacificbathroomselection.netlify.app";
 
 const PROXY = (rawUrl: string) =>
   `${SITE}/.netlify/functions/file-proxy?url=${encodeURIComponent(rawUrl)}`;
+
 
 import PptxGenJS from "pptxgenjs";
 import type { Product, ClientInfo } from "../types";
