@@ -211,7 +211,12 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
     // Left image (via proxy → base64 data URL)
     const dataUrl = await fetchAsDataUrl(imageUrl);
     if (dataUrl) {
-      s.addImage({ data: dataUrl, ...L.img, sizing: { type: "contain", w: L.img.w, h: L.img.h } } as any);
+     s.addImage({
+  data: toPptxBase64Header(dataUrl),
+  ...L.img,
+  sizing: { type: "contain", w: L.img.w, h: L.img.h },
+} as any);
+
     } else {
       // light placeholder if image fails
       s.addShape(PptxGenJS.ShapeType.roundRect, {
