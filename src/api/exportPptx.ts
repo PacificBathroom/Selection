@@ -316,13 +316,18 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
       str((row as any).thumbnail) ||
       undefined;
 
-    const pdfUrl =
-      str(getField(row, ["PDF URL","PdfURL","Spec PDF","Spec Sheet","Datasheet","Brochure","URL","Link"])) ||
-      str((row as any).pdfUrl) ||
-      str((row as any).specPdfUrl) ||
-      str((row as any).url) ||
-      str((row as any).link) ||
-      undefined;
+   // Prefer explicit PDF-ish fields; only fall back to URL/Link if it *looks* like a PDF
+const primaryPdf =
+  str(getField(row, ["PDF URL","PdfURL","Spec PDF","Spec Sheet","Datasheet","Brochure"])) ||
+  str((row as any).pdfUrl) ||
+  str((row as any).specPdfUrl);
+
+const genericUrl =
+  str((row as any).url) ||
+  str((row as any).link) ||
+  str(getField(row, ["URL","Link"]));
+
+const pdfUrl = primaryPdf ?? (genericUrl && /\.pdf(\?|#|$)/i.test(genericUrl) ? genericUrl : undefined);
 
     const specs = toSpecPairs(row);
 
