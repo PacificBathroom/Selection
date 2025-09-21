@@ -7,6 +7,11 @@ const CORS = {
 };
 
 export const handler: Handler = async (event) => {
+  // Preflight
+  if (event.httpMethod === "OPTIONS") {
+    return { statusCode: 204, headers: CORS };
+  }
+
   try {
     const url = event.queryStringParameters?.url;
     if (!url) {
@@ -14,7 +19,15 @@ export const handler: Handler = async (event) => {
     }
 
     // Follow redirects and fetch the upstream file (image/pdf/html)
-    const upstream = await fetch(url, { redirect: "follow" });
+    const upstream = await fetch(url, {
+      redirect: "follow",
+      headers: {
+        // Some hosts refuse requests without a browsery UA
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36",
+      },
+    });
+
     if (!upstream.ok) {
       return {
         statusCode: upstream.status,
@@ -26,7 +39,7 @@ export const handler: Handler = async (event) => {
     const contentType = upstream.headers.get("content-type") || "application/octet-stream";
     const buf = Buffer.from(await upstream.arrayBuffer());
 
-    // Return binary as base64 so the browser can consume it safely
+    // Return binary as base64
     return {
       statusCode: 200,
       headers: {
