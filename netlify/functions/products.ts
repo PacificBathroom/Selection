@@ -1,13 +1,9 @@
-// netlify/functions/products.ts
 import type { Handler } from "@netlify/functions";
-import fs from "fs";
-import path from "path";
-import * as XLSX from "xlsx";
+import { google } from "googleapis";
 
-/** rename your file to something without spaces for safety */
-const FILE_NAME = "precero.xlsx"; // put the file at /public/assets/precero.xlsx
+const SPREADSHEET_ID = process.env.SHEETS_SPREADSHEET_ID!;
+const DEFAULT_RANGE = "Products!A:ZZ"; // adjust tab name/columns
 
-// Map common header names to the keys your app/exporter expect
 const KEY_ALIASES: Record<string, string> = {
   url: "url",
   name: "name",
@@ -23,17 +19,25 @@ const KEY_ALIASES: Record<string, string> = {
   specpdfurl: "specPdfUrl",
   specifications: "specifications",
   specs: "specs",
-  specsbullets: "specs",        // your G column
+  specsbullets: "specs",
 };
 
-function normalizeRow(row: any) {
+function normalizeRow(headers: string[], arr: unknown[]) {
   const out: any = {};
-  for (const [kRaw, v] of Object.entries(row)) {
-    const k = String(kRaw).trim();
-    const keyNorm = KEY_ALIASES[k.toLowerCase()] || k;
-    out[keyNorm] = v;
-  }
+  headers.forEach((h, i) => {
+    const keyNorm = KEY_ALIASES[h.toLowerCase()] || h;
+    out[keyNorm] = arr[i] ?? "";
+  });
   return out;
+}
+
+function sheetsClient() {
+  const auth = new google.auth.JWT({
+    email: process.env.GOOGLE_CLIENT_EMAIL,
+    key: (process.env.GOOGLE_PRIVATE_KEY || "").replace(/\\n/g, "\n"),
+    scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"],
+  });
+  return google.sheets({ version: "v4", auth });
 }
 
 export const handler: Handler = async (event) => {
@@ -41,25 +45,21 @@ export const handler: Handler = async (event) => {
     const q = (event.queryStringParameters?.q || "").toLowerCase();
     const category = (event.queryStringParameters?.category || "").toLowerCase();
 
-    const abs = path.join(process.cwd(), "public", "assets", FILE_NAME);
-    if (!fs.existsSync(abs)) {
-      return {
-        statusCode: 404,
-        headers: { "Access-Control-Allow-Origin": "*" },
-        body: `Excel not found at ${abs}`,
-      };
-    }
+    const sheets = sheetsClient();
+    const resp = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: DEFAULT_RANGE,
+    });
 
-    const wb = XLSX.readFile(abs, { cellDates: false });
-    const ws = wb.Sheets[wb.SheetNames[0]];
-    const rawRows = XLSX.utils.sheet_to_json(ws, { defval: "" }) as any[];
+    const values = resp.data.values || [];
+    if (!values.length) return { statusCode: 200, body: '{"items":[]}' };
 
-    // normalize keys and filter
-    let items = rawRows.map(normalizeRow);
+    const headers = (values[0] || []).map((h: any) => String(h ?? ""));
+    let items = values.slice(1).map((arr) => normalizeRow(headers, arr));
 
     if (category) {
-      items = items.filter((r) =>
-        String(r.category || "").toLowerCase() === category
+      items = items.filter(
+        (r) => String(r.category || "").toLowerCase() === category
       );
     }
 
@@ -74,7 +74,7 @@ export const handler: Handler = async (event) => {
         ]
           .map((x) => String(x || "").toLowerCase())
           .join(" ");
-        return hay.includes(q) || hay.indexOf(q) >= 0;
+        return hay.includes(q);
       });
     }
 
@@ -90,7 +90,7 @@ export const handler: Handler = async (event) => {
     return {
       statusCode: 500,
       headers: { "Access-Control-Allow-Origin": "*" },
-      body: String(e?.message || e),
+      body: JSON.stringify({ error: e?.message || "Sheets read error" }),
     };
   }
 };
