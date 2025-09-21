@@ -1,11 +1,13 @@
 // src/api/exportPptx.ts
+
+// --- Helpers PptxGenJS needs for base64 images -----------------------------
 function toPptxBase64Header(dataUrl: string): string {
   // Accept either "data:image/png;base64,..." or "image/png;base64,..."
-  let s = dataUrl.trim();
-  if (s.startsWith("data:")) s = s.slice(5);               // remove "data:"
-  // Some hosts reply "application/octet-stream" – force to a real image header for PPTX
+  let s = (dataUrl || "").trim();
+  if (s.startsWith("data:")) s = s.slice(5); // remove "data:"
+  // Coerce unknown type to a real image header so PPTX accepts it
   if (s.startsWith("application/octet-stream;base64,")) {
-    s = "image/jpeg;base64," + s.split("base64,")[1];      // default to jpeg header
+    s = "image/jpeg;base64," + s.split("base64,")[1];
   }
   return s;
 }
@@ -16,11 +18,10 @@ import type { Product, ClientInfo } from "../types";
 // -------------------------------------------------------------
 // Settings
 // -------------------------------------------------------------
-// Use the Netlify function you created earlier:
 const PROXY = (rawUrl: string) =>
   `/.netlify/functions/file-proxy?url=${encodeURIComponent(rawUrl)}`;
 
-// Turn off PDF thumbnails for stability (you can re-enable later if you want)
+// If you later add PDF thumbs, wire them separately; keeping off for stability.
 const SHOW_PDF_THUMBS = false;
 
 // Simple console tracer
@@ -28,7 +29,7 @@ const DEBUG = true;
 const dlog = (...a: any[]) => DEBUG && console.log("[pptx]", ...a);
 
 // -------------------------------------------------------------
-// Helpers
+// Generic helpers
 // -------------------------------------------------------------
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 const str = (v: unknown) => {
@@ -58,6 +59,7 @@ function getField<T = unknown>(row: Record<string, any>, aliases: string[]): T |
   return undefined;
 }
 
+// Netlify proxy -> base64 data URL (ensure an image/* content-type)
 async function fetchAsDataUrl(rawUrl?: string): Promise<string | undefined> {
   if (!rawUrl) return undefined;
   const res = await fetch(PROXY(rawUrl));
@@ -65,9 +67,10 @@ async function fetchAsDataUrl(rawUrl?: string): Promise<string | undefined> {
     dlog("proxy fetch failed", res.status, rawUrl);
     return undefined;
   }
-  const contentType = res.headers.get("content-type") ?? "application/octet-stream";
+  let ct = (res.headers.get("content-type") || "").toLowerCase();
   const b64 = await res.text(); // function returns base64 text
-  return `data:${contentType};base64,${b64}`;
+  if (!ct.startsWith("image/")) ct = "image/jpeg"; // coerce if needed
+  return `data:${ct};base64,${b64}`;
 }
 
 /**
@@ -211,24 +214,23 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
     // Left image (via proxy → base64 data URL)
     const dataUrl = await fetchAsDataUrl(imageUrl);
     if (dataUrl) {
-     s.addImage({
-  data: toPptxBase64Header(dataUrl),
-  ...L.img,
-  sizing: { type: "contain", w: L.img.w, h: L.img.h },
-} as any);
-
+      s.addImage({
+        data: toPptxBase64Header(dataUrl),
+        ...L.img,
+        sizing: { type: "contain", w: L.img.w, h: L.img.h },
+      } as any);
     } else {
       // light placeholder if image fails
       s.addShape(PptxGenJS.ShapeType.roundRect, {
         ...L.img, fill: { color: brand.faint }, line: { color: "D0D7E2", width: 1 },
       } as any);
       s.addText("Image unavailable", {
-        x: L.img.x, y: L.img.y + L.img.h/2 - 0.2, w: L.img.w, h: 0.4,
+        x: L.img.x, y: L.img.y + L.img.h / 2 - 0.2, w: L.img.w, h: 0.4,
         align: "center", fontFace: "Inter", fontSize: 12, color: "667085",
       } as any);
     }
 
-    // Right bullets (this mirrors your screenshot)
+    // Right bullets
     if (bullets.length) {
       s.addText(
         bullets.map((b) => `• ${b}`).join("\n"),
@@ -255,7 +257,7 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
     const s = pptx.addSlide();
     s.background = { color: brand.bg };
     s.addText("Thank you", {
-      x: 0.8, y: 2.0, w: 8.5, h: 1, fontFace: "Inter", fontSize: 36, bold: true, color: brand.text, align: "center",
+      x: 0.8, y: 2.0, w: 8.5, h: 1, fontFace: "Inter", fontSize: 36, bold: true, color: "0F172A", align: "center",
     } as any);
     const parts: string[] = [];
     if (client.contactName) parts.push(client.contactName);
