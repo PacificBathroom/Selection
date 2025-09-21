@@ -1,11 +1,8 @@
 // src/api/exportPptx.ts
 // Product selection → PPTX exporter (PptxGenJS)
-// - Fetches images via Netlify proxy
-// - Coerces non-jpeg/png (webp/gif/svg/unknown) to PNG in-browser
-// - Shows a visible reason on the slide if an image can’t be embedded
-// - Adds a tiny "NEW exporter v2" stamp on each product slide for verification
+// v2.1 – hardened image handling, visible error text, verification stamp
 
-console.log("[pptx] exporter version: v2-active");
+console.log("[pptx] exporter version: v2.1-hard");
 
 import PptxGenJS from "pptxgenjs";
 import type { Product, ClientInfo } from "../types";
@@ -60,8 +57,8 @@ function normalizeImageUrl(u?: string): string | undefined {
   return s;
 }
 
-// Convert ANY browser data URL to PNG data URL (handles webp/gif/svg/etc.)
-async function dataUrlToPngDataUrl(dataUrl: string): Promise<string> {
+// Load any dataURL → ensure it's a real image and convert to PNG
+async function ensurePngDataUrl(dataUrl: string): Promise<{ ok: boolean; pngUrl?: string; msg?: string }> {
   return await new Promise((resolve) => {
     const img = new Image();
     img.crossOrigin = "anonymous";
@@ -71,19 +68,20 @@ async function dataUrlToPngDataUrl(dataUrl: string): Promise<string> {
         canvas.width = img.naturalWidth || img.width || 1;
         canvas.height = img.naturalHeight || img.height || 1;
         const ctx = canvas.getContext("2d");
-        if (!ctx) return resolve(dataUrl);
+        if (!ctx) return resolve({ ok: false, msg: "canvas ctx" });
         ctx.drawImage(img, 0, 0);
-        resolve(canvas.toDataURL("image/png")); // always PNG after this
-      } catch {
-        resolve(dataUrl);
+        const png = canvas.toDataURL("image/png");
+        resolve({ ok: true, pngUrl: png });
+      } catch (e: any) {
+        resolve({ ok: false, msg: "canvas draw" });
       }
     };
-    img.onerror = () => resolve(dataUrl);
+    img.onerror = () => resolve({ ok: false, msg: "not an image/blocked" });
     img.src = dataUrl;
   });
 }
 
-// Fetch via Netlify proxy → browser dataURL; coerce to PNG/JPEG if needed
+// Fetch via Netlify proxy → browser dataURL → validate → PNG
 async function fetchAsDataUrl(
   rawUrl?: string
 ): Promise<{ ok: boolean; dataUrl?: string; msg?: string }> {
@@ -96,14 +94,14 @@ async function fetchAsDataUrl(
   let ct = (res.headers.get("content-type") || "").toLowerCase();
   const b64 = await res.text();
 
-  if (!ct.startsWith("image/")) ct = "image/jpeg"; // coerce if unknown
-  let dataUrl = `data:${ct};base64,${b64}`;
+  if (!ct.startsWith("image/")) ct = "image/jpeg"; // if unknown, try decode as jpeg
+  const dataUrl = `data:${ct};base64,${b64}`;
 
-  // If not jpeg/png, convert to PNG (handles webp/gif/svg etc.)
-  if (!(ct.startsWith("image/png") || ct.startsWith("image/jpeg"))) {
-    dataUrl = await dataUrlToPngDataUrl(dataUrl);
-  }
-  return { ok: true, dataUrl };
+  // Validate and convert to PNG
+  const check = await ensurePngDataUrl(dataUrl);
+  if (!check.ok || !check.pngUrl) return { ok: false, msg: check.msg || "invalid image data" };
+
+  return { ok: true, dataUrl: check.pngUrl };
 }
 
 // PptxGenJS wants 'image/<type>;base64,...' (no 'data:' prefix)
@@ -258,32 +256,35 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
       fontFace: "Inter", fontSize: 22, bold: true, color: brand.text, align: "center", fit: "shrink",
     } as any);
 
-    // Visible stamp so you can confirm V2 ran
+    // Verification stamp (so you know this file ran)
     s.addText("NEW exporter v2", {
       x: 0.15, y: 0.15, w: 2, h: 0.3,
       fontSize: 10, color: "FF0000", fontFace: "Inter",
     } as any);
 
-    // Left image (proxy → base64 → ensure PNG/JPEG → addImage)
+    // Left image (proxy → base64 → validate/PNG → addImage)
     const im = await fetchAsDataUrl(imageUrl);
     if (im.ok && im.dataUrl) {
-      const header = toPptxBase64Header(im.dataUrl);
-      if (!/^image\/(png|jpeg);base64,/i.test(header)) {
-        // Visible reason if weird header survives conversion
-        s.addShape(PptxGenJS.ShapeType.roundRect, { ...L.img, fill: { color: brand.faint } } as any);
-        s.addText("Image format not supported", {
-          x: L.img.x, y: L.img.y + L.img.h / 2 - 0.2, w: L.img.w, h: 0.4,
-          align: "center", fontFace: "Inter", fontSize: 12, color: "667085",
-        } as any);
-      } else {
+      try {
+        const header = toPptxBase64Header(im.dataUrl);
+        if (!/^image\/(png|jpeg);base64,/i.test(header)) {
+          throw new Error("unsupported header");
+        }
         s.addImage({
           data: header,
           ...L.img,
           sizing: { type: "contain", w: L.img.w, h: L.img.h },
         } as any);
+      } catch (e: any) {
+        console.error("[pptx] addImage failed:", e);
+        s.addShape(PptxGenJS.ShapeType.roundRect, { ...L.img, fill: { color: brand.faint } } as any);
+        s.addText("addImage failed", {
+          x: L.img.x, y: L.img.y + L.img.h / 2 - 0.2, w: L.img.w, h: 0.4,
+          align: "center", fontFace: "Inter", fontSize: 12, color: "667085",
+        } as any);
       }
     } else {
-      // Placeholder + visible reason helps you fix the row fast
+      // Placeholder + visible reason helps fix the row quickly
       s.addShape(PptxGenJS.ShapeType.roundRect, {
         ...L.img, fill: { color: brand.faint }, line: { color: "D0D7E2", width: 1 },
       } as any);
@@ -337,5 +338,5 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
 }
 
 // Exports
-export const exportPptxV2 = exportSelectionToPptx;   // preferred (use this in your import)
-export const exportPptx   = exportSelectionToPptx;   // compatibility with old imports
+export const exportPptxV2 = exportSelectionToPptx;   // preferred (import this where you trigger export)
+export const exportPptx   = exportSelectionToPptx;   // backward-compatible alias
