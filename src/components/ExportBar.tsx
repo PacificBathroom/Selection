@@ -1,14 +1,8 @@
 // src/components/ExportBar.tsx
 import { useState } from "react";
 import type { Product, ClientInfo } from "@/types";
-
-// Pick ONE exporter import. If your v2.3 exporter is in "src/api/exportPptx.ts":
-import { exportPptxV2 } from "@/api/exportPptx";
-// …
-await exportPptxV2(selectedRows, clientInfo);
-
-// delete the line above:
-// import { exportPptxV2 } from "@/api/exportPptx.v2";
+import { exportPptxV2 } from "@/api/exportPptx";      // <— only this import
+import { fetchProducts } from "@/api/sheets";         // if you fetch when nothing is selected
 
 type Props = {
   /** Optional: pass the ticked items from your list UI */
@@ -25,23 +19,30 @@ export default function ExportBar({ selectedRows }: Props) {
   });
   const [isExporting, setIsExporting] = useState(false);
 
-  async function onExport() {
-    const rows = selectedRows ?? [];
-    if (!rows.length) {
-      alert("Select at least one product first.");
-      return;
-    }
-
-    setIsExporting(true);
+  const onExport = async () => {
     try {
-      await exportPptxV2(rows, client); // <-- correct state name
+      setIsExporting(true);
+
+      // Use selectedRows when provided; otherwise fetch your rows
+      const rows: Product[] =
+        selectedRows && selectedRows.length
+          ? selectedRows
+          : await fetchProducts();
+
+      if (!rows || rows.length === 0) {
+        alert("Select at least one product to export.");
+        return;
+      }
+
+      // 👇 call the exporter *inside* the handler with the component state
+      await exportPptxV2(rows, client);
     } catch (e: any) {
       console.error("[export] failed:", e);
       alert(`Export failed: ${e?.message || e}`);
     } finally {
       setIsExporting(false);
     }
-  }
+  };
 
   return (
     <div className="flex flex-col gap-3">
