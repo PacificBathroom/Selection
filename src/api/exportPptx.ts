@@ -1,32 +1,21 @@
 // src/api/exportPptx.ts
 // Product selection → PPTX exporter (PptxGenJS)
-// v2.1 – hardened image handling, visible error text, verification stamp
+// v2.4 — robust Netlify proxy, image → PNG coercion, safe layout
 
-
-console.log("[pptx] exporter version: v2.1-hard");
+console.log("[pptx] exporter version: v2.4");
 
 import PptxGenJS from "pptxgenjs";
 import type { Product, ClientInfo } from "../types";
-// wherever you trigger export
-import { exportPptx } from "@/api/exportPptx";
-import { exportPptxV2 } from "@/api/exportPptx.v2";
-
-
-await exportPptxV2(selectedRows ?? products, clientInfo);
-
 
 // -----------------------------------------------------------------------------
-// Settings
+// Config
 // -----------------------------------------------------------------------------
-// Always call your own site (works even if the app is embedded elsewhere)
 const SITE =
   (typeof window !== "undefined" && window.location?.origin) ||
   "https://pacificbathroomselection.netlify.app";
 
 const PROXY = (rawUrl: string) =>
   `${SITE}/.netlify/functions/file-proxy?url=${encodeURIComponent(rawUrl)}`;
-
-
 
 const DEBUG = true;
 const dlog = (...a: any[]) => DEBUG && console.log("[pptx]", ...a);
@@ -41,20 +30,19 @@ const str = (v: unknown) => {
   return s || undefined;
 };
 
-// Extract URL from =IMAGE("https://…")
+// =IMAGE("https://…") un-wrapper
 function extractUrlFromImageFormula(v: unknown): string | undefined {
   if (typeof v !== "string") return undefined;
   const m = v.trim().match(/^=*\s*image\s*\(\s*"([^"]+)"\s*(?:,.*)?\)\s*$/i);
   return m?.[1];
 }
 
-// Case/space-insensitive getter with aliases (unwraps IMAGE())
+// Case/space-insensitive getter with aliases
 function getField<T = unknown>(row: Record<string, any>, aliases: string[]): T | undefined {
   const want = aliases.map(norm);
   for (const k of Object.keys(row)) {
-    const nk = norm(k);
-    if (want.includes(nk)) {
-      const raw = row[k];
+    if (want.includes(norm(k))) {
+      const raw = (row as any)[k];
       const img = extractUrlFromImageFormula(raw);
       return (img ?? raw) as T;
     }
@@ -62,17 +50,27 @@ function getField<T = unknown>(row: Record<string, any>, aliases: string[]): T |
   return undefined;
 }
 
-// Normalize common URL oddities from spreadsheets
 function normalizeImageUrl(u?: string): string | undefined {
   if (!u) return undefined;
   let s = String(u).trim();
-  s = s.replace(/^"+|"+$/g, "");   // strip wrapping quotes
+  s = s.replace(/^"+|"+$/g, "");       // remove stray quotes
   if (s.startsWith("//")) s = "https:" + s;
-  s = s.replace(/\s/g, "%20");     // spaces → %20
+  s = s.replace(/\s/g, "%20");         // spaces → %20
   return s;
 }
 
-// Load any dataURL → ensure it's a real image and convert to PNG
+// Binary → base64 (chunked to avoid stack issues)
+function arrayBufferToBase64(buf: ArrayBuffer): string {
+  const bytes = new Uint8Array(buf);
+  const chunk = 0x8000;
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk) as unknown as number[]);
+  }
+  return btoa(binary);
+}
+
+// Validate any dataURL by drawing to <canvas> and re-encode as PNG
 async function ensurePngDataUrl(dataUrl: string): Promise<{ ok: boolean; pngUrl?: string; msg?: string }> {
   return await new Promise((resolve) => {
     const img = new Image();
@@ -80,14 +78,13 @@ async function ensurePngDataUrl(dataUrl: string): Promise<{ ok: boolean; pngUrl?
     img.onload = () => {
       try {
         const canvas = document.createElement("canvas");
-        canvas.width = img.naturalWidth || img.width || 1;
-        canvas.height = img.naturalHeight || img.height || 1;
+        canvas.width = img.naturalWidth || 1;
+        canvas.height = img.naturalHeight || 1;
         const ctx = canvas.getContext("2d");
         if (!ctx) return resolve({ ok: false, msg: "canvas ctx" });
         ctx.drawImage(img, 0, 0);
-        const png = canvas.toDataURL("image/png");
-        resolve({ ok: true, pngUrl: png });
-      } catch (e: any) {
+        resolve({ ok: true, pngUrl: canvas.toDataURL("image/png") });
+      } catch {
         resolve({ ok: false, msg: "canvas draw" });
       }
     };
@@ -96,33 +93,10 @@ async function ensurePngDataUrl(dataUrl: string): Promise<{ ok: boolean; pngUrl?
   });
 }
 
-// Fetch via Netlify proxy → browser dataURL → validate → PNG
-async function fetchAsDataUrl(
-  rawUrl?: string
-): Promise<{ ok: boolean; dataUrl?: string; msg?: string }> {
-  const url = normalizeImageUrl(rawUrl);
-  if (!url) return { ok: false, msg: "no image url" };
-
-  const res = await fetch(PROXY(url));
-  if (!res.ok) return { ok: false, msg: `proxy ${res.status}` };
-
-  let ct = (res.headers.get("content-type") || "").toLowerCase();
-  const b64 = await res.text();
-
-  if (!ct.startsWith("image/")) ct = "image/jpeg"; // if unknown, try decode as jpeg
-  const dataUrl = `data:${ct};base64,${b64}`;
-
-  // Validate and convert to PNG
-  const check = await ensurePngDataUrl(dataUrl);
-  if (!check.ok || !check.pngUrl) return { ok: false, msg: check.msg || "invalid image data" };
-
-  return { ok: true, dataUrl: check.pngUrl };
-}
-
-// PptxGenJS wants 'image/<type>;base64,...' (no 'data:' prefix)
+// PptxGenJS wants 'image/<type>;base64,...' (no 'data:')
 function toPptxBase64Header(dataUrl: string): string {
-  let s = (dataUrl || "").trim();
-  if (s.startsWith("data:")) s = s.slice(5); // strip 'data:'
+  let s = dataUrl.trim();
+  if (s.startsWith("data:")) s = s.slice(5);
   if (s.startsWith("application/octet-stream;base64,")) {
     s = "image/jpeg;base64," + s.split("base64,")[1];
   }
@@ -131,14 +105,14 @@ function toPptxBase64Header(dataUrl: string): string {
 
 /**
  * Build bullet lines from flexible shapes:
- *  - "SpecsBullets" | "Specifications" | "Features" etc (multi-line or | or •)
- *  - Array field "specs" of strings or {label,value}
- *  - Fallback: short key/value fields -> "Label: value"
+ *  - long text ("Specifications" / "Features" / etc.)
+ *  - array specs: string[] or {label,value}[]
+ *  - fallback: short key/value fields
  */
 function toBulletLines(row: Record<string, any>): string[] {
   const lines: string[] = [];
 
-  // 1) Array forms
+  // array forms
   const anySpecs = (row as any).specs;
   if (Array.isArray(anySpecs)) {
     for (const it of anySpecs) {
@@ -154,7 +128,7 @@ function toBulletLines(row: Record<string, any>): string[] {
     }
   }
 
-  // 2) Long text forms
+  // long text forms
   const long =
     str(getField(row, ["SpecsBullets","Specifications","Specs","Product Details","Details","Features","Notes"])) ||
     str((row as any).specifications) ||
@@ -168,21 +142,17 @@ function toBulletLines(row: Record<string, any>): string[] {
     }
   }
 
-  // 3) Short key/value fallback (skip obvious non-spec keys)
+  // short K/V fallback
   if (!lines.length) {
     const SKIP = new Set(
       ["name","product","title","code","sku","image","imageurl","photo","thumbnail","url","link",
-       "pdf","pdfurl","specpdfurl","description","desc","shortdescription","longdescription","specsbullets"]
-      .map(norm)
+       "pdf","pdfurl","specpdfurl","description","desc","shortdescription","longdescription","specsbullets"].map(norm)
     );
     for (const key of Object.keys(row)) {
-      const nk = norm(key);
-      if (SKIP.has(nk)) continue;
-      const val = String(row[key] ?? "").trim();
+      if (SKIP.has(norm(key))) continue;
+      const val = String((row as any)[key] ?? "").trim();
       if (!val) continue;
-      if (val.length <= 120) {
-        lines.push(`${key.replace(/\s+/g, " ").trim()}: ${val}`);
-      }
+      if (val.length <= 120) lines.push(`${key.replace(/\s+/g, " ").trim()}: ${val}`);
       if (lines.length >= 12) break;
     }
   }
@@ -191,12 +161,48 @@ function toBulletLines(row: Record<string, any>): string[] {
 }
 
 // -----------------------------------------------------------------------------
+// Fetch image via proxy → binary → base64 → dataURL → PNG dataURL
+// -----------------------------------------------------------------------------
+async function fetchAsDataUrl(rawUrl?: string): Promise<string | undefined> {
+  const url = normalizeImageUrl(rawUrl);
+  if (!url) return undefined;
+
+  const res = await fetch(PROXY(url));
+  if (!res.ok) {
+    dlog("proxy fetch failed", res.status, url);
+    return undefined;
+  }
+
+  const ct = res.headers.get("content-type") ?? "application/octet-stream";
+
+  // Prefer binary → base64; fall back to text (if the function already returns base64)
+  let base64: string;
+  try {
+    const buf = await res.arrayBuffer();
+    base64 = arrayBufferToBase64(buf);
+  } catch {
+    base64 = await res.text();
+  }
+
+  const dataUrl = `data:${ct};base64,${base64}`;
+  const verified = await ensurePngDataUrl(dataUrl);
+  if (!verified.ok || !verified.pngUrl) {
+    dlog("ensurePngDataUrl failed:", verified.msg);
+    return undefined;
+  }
+  return verified.pngUrl; // always a PNG data URL now
+}
+
+// -----------------------------------------------------------------------------
 // PPT Export (layout: image left, bullets right, description bottom)
 // -----------------------------------------------------------------------------
 export async function exportSelectionToPptx(rows: Product[], client: ClientInfo) {
   const pptx = new PptxGenJS();
-  pptx.layout = "LAYOUT_16x9";
+  pptx.layout = "LAYOUT_16x9"; // 10.0" x 5.625"
   pptx.title = client.projectName || "Product Presentation";
+
+  const slideW = 10.0;
+  const slideH = 5.625;
 
   const brand = {
     bg: "FFFFFF",
@@ -225,29 +231,38 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
     }
   }
 
-  // Layout (16x9 height ~5.63")
+  // Safe layout (computed from slide size so nothing goes off-page)
+  const barH = 0.30;
+  const barY = slideH - barH;
+  const descH = 0.48;
+  const descY = barY - 0.35;
+
   const L = {
     title:   { x: 0.5, y: 0.5, w: 9.0, h: 0.7 },
-    img:     { x: 0.5, y: 1.1, w: 5.2, h: 3.7 },  // image LEFT
-    specs:   { x: 6.0, y: 1.1, w: 3.5, h: 3.9 },  // bullet list RIGHT
-    desc:    { x: 0.6, y: 4.9, w: 8.8, h: 0.48 },
-    bar:     { x: 0.0, y: 5.30, w: 10.0, h: 0.30 },
-    barText: { x: 0.6, y: 5.04, w: 8.8, h: 0.25 },
+    img:     { x: 0.5, y: 1.1, w: 5.2, h: 3.7 },
+    specs:   { x: 6.0, y: 1.1, w: 3.5, h: 3.9 },
+    desc:    { x: 0.6, y: descY, w: 8.8, h: descH },
+    bar:     { x: 0.0, y: barY, w: slideW, h: barH },
+    barText: { x: 0.6, y: barY - 0.26, w: 8.8, h: 0.25 },
   };
 
   for (const row of rows as unknown as Record<string, any>[]) {
-    // Resolve fields
     const title =
       str(getField(row, ["Name","Product","Title"])) ||
-      str((row as any).name) || str((row as any).product) || "Untitled Product";
+      str((row as any).name) ||
+      str((row as any).product) ||
+      "Untitled Product";
 
     const description =
       str(getField(row, ["Description","Desc","Summary","Long Description","Short Description"])) ||
-      str((row as any).description) || str((row as any).longDescription) || str((row as any).shortDescription);
+      str((row as any).description) ||
+      str((row as any).longDescription) ||
+      str((row as any).shortDescription);
 
     const code =
       str(getField(row, ["Code","SKU","Model","Item","Product Code"])) ||
-      str((row as any).code) || str((row as any).sku);
+      str((row as any).code) ||
+      str((row as any).sku);
 
     const imageUrl =
       str(getField(row, [
@@ -259,39 +274,28 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
       str((row as any).thumbnail);
 
     const bullets = toBulletLines(row);
-
     dlog({ title, code, imageUrl, bullets: bullets.length });
 
     const s = pptx.addSlide();
     s.background = { color: brand.bg };
 
-    // Title (centered)
+    // Title
     s.addText(title, {
       ...L.title,
       fontFace: "Inter", fontSize: 22, bold: true, color: brand.text, align: "center", fit: "shrink",
     } as any);
 
-    // Verification stamp (so you know this file ran)
-    s.addText("NEW exporter v2", {
-      x: 0.15, y: 0.15, w: 2, h: 0.3,
-      fontSize: 10, color: "FF0000", fontFace: "Inter",
-    } as any);
+    // Tiny stamp so you can confirm the new code ran
+    s.addText("NEW exporter v2", { x: 0.15, y: 0.15, w: 2, h: 0.3, fontSize: 10, color: "FF0000" } as any);
 
-    // Left image (proxy → base64 → validate/PNG → addImage)
-    const im = await fetchAsDataUrl(imageUrl);
-    if (im.ok && im.dataUrl) {
+    // Image (proxy → dataURL → PNG → addImage)
+    const imgDataUrl = await fetchAsDataUrl(imageUrl);
+    if (imgDataUrl) {
       try {
-        const header = toPptxBase64Header(im.dataUrl);
-        if (!/^image\/(png|jpeg);base64,/i.test(header)) {
-          throw new Error("unsupported header");
-        }
-        s.addImage({
-          data: header,
-          ...L.img,
-          sizing: { type: "contain", w: L.img.w, h: L.img.h },
-        } as any);
-      } catch (e: any) {
-        console.error("[pptx] addImage failed:", e);
+        const header = toPptxBase64Header(imgDataUrl);
+        if (!/^image\/(png|jpeg);base64,/i.test(header)) throw new Error("unsupported header");
+        s.addImage({ data: header, ...L.img, sizing: { type: "contain", w: L.img.w, h: L.img.h } } as any);
+      } catch (e) {
         s.addShape(PptxGenJS.ShapeType.roundRect, { ...L.img, fill: { color: brand.faint } } as any);
         s.addText("addImage failed", {
           x: L.img.x, y: L.img.y + L.img.h / 2 - 0.2, w: L.img.w, h: 0.4,
@@ -299,59 +303,47 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
         } as any);
       }
     } else {
-      // Placeholder + visible reason helps fix the row quickly
-      s.addShape(PptxGenJS.ShapeType.roundRect, {
-        ...L.img, fill: { color: brand.faint }, line: { color: "D0D7E2", width: 1 },
-      } as any);
-      s.addText(`Image unavailable (${im.msg || "unknown"})`, {
+      s.addShape(PptxGenJS.ShapeType.roundRect, { ...L.img, fill: { color: brand.faint }, line: { color: "D0D7E2", width: 1 } } as any);
+      s.addText("Image unavailable", {
         x: L.img.x, y: L.img.y + L.img.h / 2 - 0.2, w: L.img.w, h: 0.4,
         align: "center", fontFace: "Inter", fontSize: 12, color: "667085",
       } as any);
     }
 
-    // Right bullets
+    // Bullets
     if (bullets.length) {
-      s.addText(
-        bullets.map((b) => `• ${b}`).join("\n"),
-        { ...L.specs, fontSize: 12, fontFace: "Inter", color: "111827" } as any
-      );
+      s.addText(bullets.map((b) => `• ${b}`).join("\n"), { ...L.specs, fontSize: 12, fontFace: "Inter", color: "111827" } as any);
     }
 
-    // Description along the bottom
+    // Description
     if (description) {
-      s.addText(description, {
-        ...L.desc, align: "center", fontFace: "Inter", fontSize: 12, color: "344054", fit: "shrink",
-      } as any);
+      s.addText(description, { ...L.desc, align: "center", fontFace: "Inter", fontSize: 12, color: "344054", fit: "shrink" } as any);
     }
 
-    // Footer bar + code (optional)
+    // Footer bar + code
     s.addShape(PptxGenJS.ShapeType.rect, { ...L.bar, fill: { color: brand.bar }, line: { color: brand.bar } } as any);
-    if (code) {
-      s.addText(code, { ...L.barText, fontFace: "Inter", fontSize: 12, color: "0B3A33", align: "left" } as any);
-    }
+    if (code) s.addText(code, { ...L.barText, fontFace: "Inter", fontSize: 12, color: "0B3A33", align: "left" } as any);
   }
 
-  // Thank-you slide
+  // Thanks slide
   {
     const s = pptx.addSlide();
     s.background = { color: brand.bg };
     s.addText("Thank you", {
-      x: 0.8, y: 2.0, w: 8.5, h: 1, fontFace: "Inter", fontSize: 36, bold: true, color: "0F172A", align: "center",
+      x: 0.8, y: 2.0, w: 8.5, h: 1, fontSize: 36, bold: true, color: "0F172A", align: "center",
     } as any);
     const parts: string[] = [];
     if (client.contactName) parts.push(client.contactName);
     if (client.contactEmail) parts.push(client.contactEmail);
     if (client.contactPhone) parts.push(client.contactPhone);
-    if (parts.length) {
-      s.addText(parts.join("  ·  "), {
-        x: 0.8, y: 3.2, w: 8.5, h: 0.8, fontFace: "Inter", fontSize: 16, color: "666666", align: "center",
-      } as any);
-    }
+    if (parts.length) s.addText(parts.join("  ·  "), {
+      x: 0.8, y: 3.2, w: 8.5, h: 0.8, fontSize: 16, color: "666666", align: "center",
+    } as any);
   }
 
   await pptx.writeFile({ fileName: `${client.projectName || "Project Selection"}.pptx` } as any);
 }
 
-// Exports
-export const exportPptxV2 = exportSelectionToPptx;   // preferred (import this where you trigger export)
-export const exportPptx   = exportSelectionToPptx;   // backward-compatible alias
+// Public exports
+export const exportPptxV2 = exportSelectionToPptx;
+export const exportPptx   = exportSelectionToPptx;
