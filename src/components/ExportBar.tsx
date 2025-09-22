@@ -1,8 +1,9 @@
 // src/components/ExportBar.tsx
 import { useState } from "react";
-import { fetchProducts } from "@/api/sheets";
-import { exportPptxV2 } from "@/api/exportPptx.v2"; // use "../api/exportPptx.v2" if you don't have "@/"
 import type { Product, ClientInfo } from "@/types";
+import { exportPptxV2 } from "@/api/exportPptx";
+import { exportPptxV2 } from "@/api/exportPptx.v2"; // use "../api/exportPptx.v2" if you don't have "@/"
+
 
 type Props = {
   /** Optional: pass the ticked items from your list UI */
@@ -40,6 +41,22 @@ export default function ExportBar({ selectedRows }: Props) {
       setIsExporting(false);
     }
   };
+async function onExport() {
+    if (!selectedRows?.length) {
+      alert("Select at least one product first.");
+      return;
+    }
+    setIsExporting(true);
+    try {
+      // <- call it here (this is the line you asked about)
+      await exportPptxV2(selectedRows, clientInfo);
+    } catch (e: any) {
+      console.error(e);
+      alert(`Export failed: ${e?.message || e}`);
+    } finally {
+      setIsExporting(false);
+    }
+  }
 
   return (
     <div className="flex flex-col gap-3">
