@@ -1,9 +1,12 @@
 // src/components/ExportBar.tsx
 import { useState } from "react";
 import type { Product, ClientInfo } from "@/types";
-import { exportPptxV2 } from "@/api/exportPptx";
-import { exportPptxV2 } from "@/api/exportPptx.v2"; // use "../api/exportPptx.v2" if you don't have "@/"
 
+// Pick ONE exporter import. If your v2.3 exporter is in "src/api/exportPptx.ts":
+import { exportPptxV2 } from "@/api/exportPptx";
+// If instead you kept it in "src/api/exportPptx.v2.ts", use this line and
+// delete the line above:
+// import { exportPptxV2 } from "@/api/exportPptx.v2";
 
 type Props = {
   /** Optional: pass the ticked items from your list UI */
@@ -20,38 +23,18 @@ export default function ExportBar({ selectedRows }: Props) {
   });
   const [isExporting, setIsExporting] = useState(false);
 
-  const onExport = async () => {
-    try {
-      setIsExporting(true);
-
-      // Use selectedRows when provided; otherwise fetch (or fetch only selected in your fetchProducts)
-      let rows: Product[] =
-        selectedRows && selectedRows.length ? selectedRows : await fetchProducts();
-
-      if (!rows || rows.length === 0) {
-        alert("Select at least one product to export.");
-        return;
-      }
-
-      await exportPptxV2(rows, client);
-    } catch (e: any) {
-      console.error("[export] failed:", e);
-      alert(`Export failed: ${e?.message || e}`);
-    } finally {
-      setIsExporting(false);
-    }
-  };
-async function onExport() {
-    if (!selectedRows?.length) {
+  async function onExport() {
+    const rows = selectedRows ?? [];
+    if (!rows.length) {
       alert("Select at least one product first.");
       return;
     }
+
     setIsExporting(true);
     try {
-      // <- call it here (this is the line you asked about)
-      await exportPptxV2(selectedRows, clientInfo);
+      await exportPptxV2(rows, client); // <-- correct state name
     } catch (e: any) {
-      console.error(e);
+      console.error("[export] failed:", e);
       alert(`Export failed: ${e?.message || e}`);
     } finally {
       setIsExporting(false);
