@@ -1,17 +1,34 @@
 // Product selection → PPTX exporter (PptxGenJS)
-// v2.3 – robust image handling + safe layout
-console.log("[pptx] exporter version: v2.3");
+// v3.0 – multi-proxy fallback (works today), safe layout, PNG coercion
+console.log("[pptx] exporter version: v3.0");
 
 import PptxGenJS from "pptxgenjs";
 import type { Product, ClientInfo } from "../types";
 
-// Use the Netlify redirect /api/* → /.netlify/functions/*
-const PROXY = (u: string) => `/api/file-proxy?url=${encodeURIComponent(u)}`;
+// -------------------------------
+// Proxy candidates (try in order)
+// -------------------------------
+const ORIGIN =
+  (typeof window !== "undefined" && window.location?.origin) ||
+  "https://pacificbathroomselection.netlify.app";
+
+const proxyUrlBuilders: Array<(rawUrl: string) => string> = [
+  // 1) Netlify redirect: /api/* -> /.netlify/functions/:splat (if present)
+  (u) => `/api/file-proxy?url=${encodeURIComponent(u)}`,
+  // 2) Direct functions path on the same origin
+  (u) => `/.netlify/functions/file-proxy?url=${encodeURIComponent(u)}`,
+  // 3) Absolute production origin (works even on preview/branch subdomains)
+  (u) => `${ORIGIN}/.netlify/functions/file-proxy?url=${encodeURIComponent(u)}`,
+  // 4) Public CORS image proxy (last resort so you can ship today)
+  (u) => `https://images.weserv.nl/?url=${encodeURIComponent(u)}`,
+];
 
 const DEBUG = true;
 const dlog = (...a: any[]) => DEBUG && console.log("[pptx]", ...a);
 
-// ---------- helpers ----------
+// -------------------------------
+// Helpers
+// -------------------------------
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 const str = (v: unknown) => (v == null ? undefined : String(v).trim() || undefined);
 
@@ -45,15 +62,15 @@ function normalizeImageUrl(u?: string): string | undefined {
 function arrayBufferToBase64(buf: ArrayBuffer): string {
   const bytes = new Uint8Array(buf);
   const chunk = 0x8000;
-  let binary = "";
+  let bin = "";
   for (let i = 0; i < bytes.length; i += chunk) {
-    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk) as unknown as number[]);
+    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk) as unknown as number[]);
   }
-  return btoa(binary);
+  return btoa(bin);
 }
 
-// Load any dataURL → draw → PNG dataURL
-async function ensurePngDataUrl(dataUrl: string): Promise<string | undefined> {
+// Any dataURL → draw → PNG dataURL (so pptxgenjs is always happy)
+async function coerceToPngDataUrl(dataUrl: string): Promise<string | undefined> {
   return await new Promise((resolve) => {
     const img = new Image();
     img.crossOrigin = "anonymous";
@@ -75,30 +92,43 @@ async function ensurePngDataUrl(dataUrl: string): Promise<string | undefined> {
   });
 }
 
-// Fetch via proxy → ArrayBuffer → base64 → dataURL → PNG
-async function fetchAsPngDataUrl(rawUrl?: string): Promise<string | undefined> {
+// Try each proxy candidate until one returns 200; return PNG data URL
+async function fetchImageAsPngDataUrl(rawUrl?: string): Promise<string | undefined> {
   const url = normalizeImageUrl(rawUrl);
   if (!url) return undefined;
 
-  const res = await fetch(PROXY(url));
-  if (!res.ok) {
-    dlog("proxy fetch failed", res.status, url);
-    return undefined;
+  for (const build of proxyUrlBuilders) {
+    const proxied = build(url);
+    try {
+      const r = await fetch(proxied, { redirect: "follow" as RequestRedirect });
+      if (!r.ok) {
+        dlog("proxy miss", r.status, proxied);
+        continue;
+      }
+      const ct = r.headers.get("content-type") ?? "application/octet-stream";
+
+      // Netlify function usually sends binary; weserv sends image/* bytes as well
+      let base64: string;
+      try {
+        const buf = await r.arrayBuffer();
+        base64 = arrayBufferToBase64(buf);
+      } catch {
+        base64 = await r.text(); // if a proxy already replies base64 text
+      }
+
+      const asDataUrl = `data:${ct};base64,${base64}`;
+      const png = await coerceToPngDataUrl(asDataUrl);
+      if (png) {
+        dlog("image via", proxied);
+        return png;
+      }
+    } catch (e) {
+      dlog("proxy error", proxied, e);
+      continue;
+    }
   }
 
-  const ct = res.headers.get("content-type") ?? "application/octet-stream";
-
-  let base64: string;
-  try {
-    const buf = await res.arrayBuffer();     // binary (because isBase64Encoded:true)
-    base64 = arrayBufferToBase64(buf);
-  } catch {
-    base64 = await res.text();               // fallback if provider sent base64 text
-  }
-
-  const dataUrl = `data:${ct};base64,${base64}`;
-  const png = await ensurePngDataUrl(dataUrl);
-  return png;
+  return undefined;
 }
 
 function toBulletLines(row: Record<string, any>): string[] {
@@ -149,10 +179,12 @@ function toBulletLines(row: Record<string, any>): string[] {
   return lines.slice(0, 12);
 }
 
-// ---------- PPT export ----------
+// -------------------------------
+// PPT export
+// -------------------------------
 export async function exportSelectionToPptx(rows: Product[], client: ClientInfo) {
   const pptx = new PptxGenJS();
-  pptx.layout = "LAYOUT_16x9";          // 10.0 x 5.625 in
+  pptx.layout = "LAYOUT_16x9"; // 10.0 x 5.625 in
   pptx.title = client.projectName || "Product Presentation";
 
   const slideW = 10.0;
@@ -176,7 +208,7 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
     }
   }
 
-  // Layout (kept inside slide bounds)
+  // Safe layout inside slide bounds
   const barH = 0.30;
   const barY = slideH - barH;
   const descH = 0.48;
@@ -185,10 +217,10 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
   const L = {
     title:   { x: 0.5, y: 0.5, w: 9.0, h: 0.7 },
     img:     { x: 0.5, y: 1.1, w: 5.2, h: 3.7 },
-    specs:   { x: 6.0, y: 1.1, w: 3.5, h: 3.9 },
-    desc:    { x: 0.6, y: descY, w: 8.8, h: descH },
-    bar:     { x: 0.0, y: barY, w: slideW, h: barH },
-    barText: { x: 0.6, y: barY - 0.26, w: 8.8, h: 0.25 },
+    specs:   { x: 6.0,  y: 1.1, w: 3.5, h: 3.9 },
+    desc:    { x: 0.6,  y: descY, w: 8.8, h: descH },
+    bar:     { x: 0.0,  y: barY,  w: slideW, h: barH },
+    barText: { x: 0.6,  y: barY - 0.26, w: 8.8, h: 0.25 },
   };
 
   for (const row of rows as unknown as Record<string, any>[]) {
@@ -214,18 +246,22 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
     const s = pptx.addSlide();
     s.background = { color: brand.bg };
 
+    // Title
     s.addText(title, {
       ...L.title, fontFace: "Inter", fontSize: 22, bold: true, color: brand.text, align: "center", fit: "shrink",
     } as any);
 
-    // visible stamp to confirm this version ran
-    s.addText("NEW exporter v2", { x: 0.15, y: 0.15, w: 2, h: 0.3, fontSize: 10, color: "FF0000" } as any);
+    // tiny stamp so you know this version ran
+    s.addText("NEW exporter v3", { x: 0.15, y: 0.15, w: 2, h: 0.3, fontSize: 10, color: "FF0000" } as any);
 
-    // Image
-    const pngDataUrl = await fetchAsPngDataUrl(imageUrl);
+    // Image (multi-proxy)
+    const pngDataUrl = await fetchImageAsPngDataUrl(imageUrl);
     if (pngDataUrl) {
-      const header = pngDataUrl.slice(5); // strip "data:"
-      s.addImage({ data: header, ...L.img, sizing: { type: "contain", w: L.img.w, h: L.img.h } } as any);
+      s.addImage({
+        data: pngDataUrl.slice(5), // strip "data:"
+        ...L.img,
+        sizing: { type: "contain", w: L.img.w, h: L.img.h },
+      } as any);
     } else {
       s.addShape(PptxGenJS.ShapeType.roundRect, { ...L.img, fill: { color: brand.faint }, line: { color: "D0D7E2", width: 1 } } as any);
       s.addText("Image unavailable", {
@@ -233,14 +269,17 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
       } as any);
     }
 
+    // Bullets
     if (bullets.length) {
       s.addText(bullets.map((b) => `• ${b}`).join("\n"), { ...L.specs, fontSize: 12, fontFace: "Inter", color: "111827" } as any);
     }
 
+    // Description
     if (description) {
       s.addText(description, { ...L.desc, align: "center", fontFace: "Inter", fontSize: 12, color: "344054", fit: "shrink" } as any);
     }
 
+    // Footer bar + SKU/code
     s.addShape(PptxGenJS.ShapeType.rect, { ...L.bar, fill: { color: brand.bar }, line: { color: brand.bar } } as any);
     if (code) s.addText(code, { ...L.barText, fontFace: "Inter", fontSize: 12, color: "0B3A33", align: "left" } as any);
   }
@@ -260,5 +299,6 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
   await pptx.writeFile({ fileName: `${client.projectName || "Project Selection"}.pptx` } as any);
 }
 
+// Public API
 export const exportPptxV2 = exportSelectionToPptx;
-export const exportPptx = exportSelectionToPptx;
+export const exportPptx   = exportSelectionToPptx;
