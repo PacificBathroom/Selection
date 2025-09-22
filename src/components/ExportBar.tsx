@@ -4,7 +4,9 @@ import type { Product, ClientInfo } from "@/types";
 
 // Pick ONE exporter import. If your v2.3 exporter is in "src/api/exportPptx.ts":
 import { exportPptxV2 } from "@/api/exportPptx";
-// If instead you kept it in "src/api/exportPptx.v2.ts", use this line and
+// …
+await exportPptxV2(selectedRows, clientInfo);
+
 // delete the line above:
 // import { exportPptxV2 } from "@/api/exportPptx.v2";
 
