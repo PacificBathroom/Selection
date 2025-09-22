@@ -1,15 +1,15 @@
 // src/api/exportPptx.ts
 // Product selection → PPTX exporter (PptxGenJS)
-// v2.4 — robust Netlify proxy, image → PNG coercion, safe layout
+// v2.4 — binary fetch via proxy, robust image coercion to PNG
 
 console.log("[pptx] exporter version: v2.4");
 
 import PptxGenJS from "pptxgenjs";
 import type { Product, ClientInfo } from "../types";
 
-// -----------------------------------------------------------------------------
-// Config
-// -----------------------------------------------------------------------------
+/* ------------------------------------------------------------------ */
+/* Config                                                             */
+/* ------------------------------------------------------------------ */
 const SITE =
   (typeof window !== "undefined" && window.location?.origin) ||
   "https://pacificbathroomselection.netlify.app";
@@ -20,9 +20,9 @@ const PROXY = (rawUrl: string) =>
 const DEBUG = true;
 const dlog = (...a: any[]) => DEBUG && console.log("[pptx]", ...a);
 
-// -----------------------------------------------------------------------------
-// Small helpers
-// -----------------------------------------------------------------------------
+/* ------------------------------------------------------------------ */
+/* Helpers                                                            */
+/* ------------------------------------------------------------------ */
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 const str = (v: unknown) => {
   if (v == null) return undefined;
@@ -30,18 +30,17 @@ const str = (v: unknown) => {
   return s || undefined;
 };
 
-// =IMAGE("https://…") un-wrapper
 function extractUrlFromImageFormula(v: unknown): string | undefined {
   if (typeof v !== "string") return undefined;
   const m = v.trim().match(/^=*\s*image\s*\(\s*"([^"]+)"\s*(?:,.*)?\)\s*$/i);
   return m?.[1];
 }
 
-// Case/space-insensitive getter with aliases
 function getField<T = unknown>(row: Record<string, any>, aliases: string[]): T | undefined {
   const want = aliases.map(norm);
   for (const k of Object.keys(row)) {
-    if (want.includes(norm(k))) {
+    const nk = norm(k);
+    if (want.includes(nk)) {
       const raw = (row as any)[k];
       const img = extractUrlFromImageFormula(raw);
       return (img ?? raw) as T;
@@ -53,47 +52,76 @@ function getField<T = unknown>(row: Record<string, any>, aliases: string[]): T |
 function normalizeImageUrl(u?: string): string | undefined {
   if (!u) return undefined;
   let s = String(u).trim();
-  s = s.replace(/^"+|"+$/g, "");       // remove stray quotes
+  s = s.replace(/^"+|"+$/g, ""); // strip wrapping quotes
   if (s.startsWith("//")) s = "https:" + s;
-  s = s.replace(/\s/g, "%20");         // spaces → %20
+  s = s.replace(/\s/g, "%20");   // spaces → %20
   return s;
 }
 
-// Binary → base64 (chunked to avoid stack issues)
 function arrayBufferToBase64(buf: ArrayBuffer): string {
   const bytes = new Uint8Array(buf);
   const chunk = 0x8000;
   let binary = "";
   for (let i = 0; i < bytes.length; i += chunk) {
-    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk) as unknown as number[]);
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk) as any);
   }
   return btoa(binary);
 }
 
-// Validate any dataURL by drawing to <canvas> and re-encode as PNG
-async function ensurePngDataUrl(dataUrl: string): Promise<{ ok: boolean; pngUrl?: string; msg?: string }> {
+// Draw any dataURL onto a canvas → get guaranteed PNG dataURL
+async function ensurePngDataUrl(dataUrl: string): Promise<string | undefined> {
   return await new Promise((resolve) => {
     const img = new Image();
     img.crossOrigin = "anonymous";
     img.onload = () => {
       try {
-        const canvas = document.createElement("canvas");
-        canvas.width = img.naturalWidth || 1;
-        canvas.height = img.naturalHeight || 1;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) return resolve({ ok: false, msg: "canvas ctx" });
+        const c = document.createElement("canvas");
+        c.width = img.naturalWidth || 1;
+        c.height = img.naturalHeight || 1;
+        const ctx = c.getContext("2d");
+        if (!ctx) return resolve(undefined);
         ctx.drawImage(img, 0, 0);
-        resolve({ ok: true, pngUrl: canvas.toDataURL("image/png") });
+        resolve(c.toDataURL("image/png"));
       } catch {
-        resolve({ ok: false, msg: "canvas draw" });
+        resolve(undefined);
       }
     };
-    img.onerror = () => resolve({ ok: false, msg: "not an image/blocked" });
+    img.onerror = () => resolve(undefined);
     img.src = dataUrl;
   });
 }
 
-// PptxGenJS wants 'image/<type>;base64,...' (no 'data:')
+// Fetch via Netlify proxy → bytes → base64 → dataURL → PNG dataURL
+async function fetchAsPngDataUrl(rawUrl?: string): Promise<string | undefined> {
+  const url = normalizeImageUrl(rawUrl);
+  if (!url) return undefined;
+
+  const res = await fetch(PROXY(url));
+  if (!res.ok) {
+    dlog("proxy fetch failed", res.status, url);
+    return undefined;
+  }
+
+  // Function returns binary (isBase64Encoded:true). Read bytes:
+  let base64: string;
+  try {
+    const buf = await res.arrayBuffer();
+    base64 = arrayBufferToBase64(buf);
+  } catch {
+    base64 = await res.text(); // rare fallback
+  }
+
+  const ct = (res.headers.get("content-type") || "image/jpeg").toLowerCase();
+  const dataUrl = `data:${ct};base64,${base64}`;
+  const png = await ensurePngDataUrl(dataUrl);
+  if (!png) {
+    dlog("ensurePngDataUrl failed");
+    return undefined;
+  }
+  return png;
+}
+
+// PptxGenJS expects 'image/<type>;base64,...' (no 'data:' prefix)
 function toPptxBase64Header(dataUrl: string): string {
   let s = dataUrl.trim();
   if (s.startsWith("data:")) s = s.slice(5);
@@ -103,16 +131,10 @@ function toPptxBase64Header(dataUrl: string): string {
   return s;
 }
 
-/**
- * Build bullet lines from flexible shapes:
- *  - long text ("Specifications" / "Features" / etc.)
- *  - array specs: string[] or {label,value}[]
- *  - fallback: short key/value fields
- */
 function toBulletLines(row: Record<string, any>): string[] {
   const lines: string[] = [];
 
-  // array forms
+  // Array form
   const anySpecs = (row as any).specs;
   if (Array.isArray(anySpecs)) {
     for (const it of anySpecs) {
@@ -128,13 +150,12 @@ function toBulletLines(row: Record<string, any>): string[] {
     }
   }
 
-  // long text forms
+  // Long text
   const long =
     str(getField(row, ["SpecsBullets","Specifications","Specs","Product Details","Details","Features","Notes"])) ||
     str((row as any).specifications) ||
     str((row as any).specs) ||
     str((row as any).SpecsBullets);
-
   if (long) {
     for (const part of long.split(/\r?\n|[|•]/).map((s) => s.trim()).filter(Boolean)) {
       lines.push(part);
@@ -142,14 +163,16 @@ function toBulletLines(row: Record<string, any>): string[] {
     }
   }
 
-  // short K/V fallback
+  // Fallback: short K/V
   if (!lines.length) {
     const SKIP = new Set(
       ["name","product","title","code","sku","image","imageurl","photo","thumbnail","url","link",
-       "pdf","pdfurl","specpdfurl","description","desc","shortdescription","longdescription","specsbullets"].map(norm)
+       "pdf","pdfurl","specpdfurl","description","desc","shortdescription","longdescription","specsbullets"]
+      .map(norm)
     );
     for (const key of Object.keys(row)) {
-      if (SKIP.has(norm(key))) continue;
+      const nk = norm(key);
+      if (SKIP.has(nk)) continue;
       const val = String((row as any)[key] ?? "").trim();
       if (!val) continue;
       if (val.length <= 120) lines.push(`${key.replace(/\s+/g, " ").trim()}: ${val}`);
@@ -160,49 +183,21 @@ function toBulletLines(row: Record<string, any>): string[] {
   return lines.slice(0, 12);
 }
 
-// -----------------------------------------------------------------------------
-// Fetch image via proxy → binary → base64 → dataURL → PNG dataURL
-// -----------------------------------------------------------------------------
-async function fetchAsDataUrl(rawUrl?: string): Promise<string | undefined> {
-  const url = normalizeImageUrl(rawUrl);
-  if (!url) return undefined;
-
-  const res = await fetch(PROXY(url));
-  if (!res.ok) {
-    dlog("proxy fetch failed", res.status, url);
-    return undefined;
-  }
-
-  const ct = res.headers.get("content-type") ?? "application/octet-stream";
-
-  // Prefer binary → base64; fall back to text (if the function already returns base64)
-  let base64: string;
-  try {
-    const buf = await res.arrayBuffer();
-    base64 = arrayBufferToBase64(buf);
-  } catch {
-    base64 = await res.text();
-  }
-
-  const dataUrl = `data:${ct};base64,${base64}`;
-  const verified = await ensurePngDataUrl(dataUrl);
-  if (!verified.ok || !verified.pngUrl) {
-    dlog("ensurePngDataUrl failed:", verified.msg);
-    return undefined;
-  }
-  return verified.pngUrl; // always a PNG data URL now
-}
-
-// -----------------------------------------------------------------------------
-// PPT Export (layout: image left, bullets right, description bottom)
-// -----------------------------------------------------------------------------
+/* ------------------------------------------------------------------ */
+/* Exporter                                                           */
+/* ------------------------------------------------------------------ */
 export async function exportSelectionToPptx(rows: Product[], client: ClientInfo) {
   const pptx = new PptxGenJS();
-  pptx.layout = "LAYOUT_16x9"; // 10.0" x 5.625"
+  pptx.layout = "LAYOUT_16x9"; // 10.0 x 5.625 in
   pptx.title = client.projectName || "Product Presentation";
 
+  // Slide geometry (keeps footer & desc on-page)
   const slideW = 10.0;
   const slideH = 5.625;
+  const barH = 0.30;
+  const barY = slideH - barH;
+  const descH = 0.48;
+  const descY = barY - 0.35;
 
   const brand = {
     bg: "FFFFFF",
@@ -220,22 +215,15 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
       x: 0.4, y: 1.0, w: 9.2, h: 1.1,
       fontFace: "Inter", fontSize: 40, bold: true, color: brand.text, align: "center",
     } as any);
-    const lines: string[] = [];
-    if (client.clientName) lines.push(`Client: ${client.clientName}`);
-    if (client.dateISO) lines.push(client.dateISO);
-    if (lines.length) {
-      s.addText(lines.join("  ·  "), {
-        x: 0.4, y: 2.2, w: 9.2, h: 0.6,
-        fontFace: "Inter", fontSize: 16, color: "666666", align: "center",
+    const meta: string[] = [];
+    if (client.clientName) meta.push(`Client: ${client.clientName}`);
+    if (client.dateISO) meta.push(client.dateISO);
+    if (meta.length) {
+      s.addText(meta.join("  ·  "), {
+        x: 0.4, y: 2.2, w: 9.2, h: 0.6, fontFace: "Inter", fontSize: 16, color: "666666", align: "center",
       } as any);
     }
   }
-
-  // Safe layout (computed from slide size so nothing goes off-page)
-  const barH = 0.30;
-  const barY = slideH - barH;
-  const descH = 0.48;
-  const descY = barY - 0.35;
 
   const L = {
     title:   { x: 0.5, y: 0.5, w: 9.0, h: 0.7 },
@@ -249,101 +237,93 @@ export async function exportSelectionToPptx(rows: Product[], client: ClientInfo)
   for (const row of rows as unknown as Record<string, any>[]) {
     const title =
       str(getField(row, ["Name","Product","Title"])) ||
-      str((row as any).name) ||
-      str((row as any).product) ||
-      "Untitled Product";
+      str((row as any).name) || str((row as any).product) || "Untitled Product";
 
     const description =
       str(getField(row, ["Description","Desc","Summary","Long Description","Short Description"])) ||
-      str((row as any).description) ||
-      str((row as any).longDescription) ||
-      str((row as any).shortDescription);
+      str((row as any).description) || str((row as any).longDescription) || str((row as any).shortDescription);
 
     const code =
       str(getField(row, ["Code","SKU","Model","Item","Product Code"])) ||
-      str((row as any).code) ||
-      str((row as any).sku);
+      str((row as any).code) || str((row as any).sku);
 
     const imageUrl =
-      str(getField(row, [
-        "ImageURL","Image URL","Image","Photo","Thumbnail","Picture",
-        "Image Link","Main Image","MainImage","Primary Image","Image Src","ImageSrc"
-      ])) ||
-      str((row as any).imageUrl) ||
-      str((row as any).image) ||
-      str((row as any).thumbnail);
+      str(getField(row, ["ImageURL","Image URL","Image","Photo","Thumbnail","Picture","Image Link","Main Image","MainImage","Primary Image","Image Src","ImageSrc"])) ||
+      str((row as any).imageUrl) || str((row as any).image) || str((row as any).thumbnail);
 
     const bullets = toBulletLines(row);
-    dlog({ title, code, imageUrl, bullets: bullets.length });
+    dlog({ title, code, hasImage: !!imageUrl, bullets: bullets.length });
 
     const s = pptx.addSlide();
     s.background = { color: brand.bg };
 
-    // Title
     s.addText(title, {
-      ...L.title,
-      fontFace: "Inter", fontSize: 22, bold: true, color: brand.text, align: "center", fit: "shrink",
+      ...L.title, fontFace: "Inter", fontSize: 22, bold: true, color: brand.text, align: "center", fit: "shrink",
     } as any);
 
-    // Tiny stamp so you can confirm the new code ran
-    s.addText("NEW exporter v2", { x: 0.15, y: 0.15, w: 2, h: 0.3, fontSize: 10, color: "FF0000" } as any);
+    // add a tiny stamp so you can see v2.4 ran
+    s.addText("NEW exporter v2.4", { x: 0.15, y: 0.15, w: 2, h: 0.3, fontSize: 10, color: "FF0000" } as any);
 
-    // Image (proxy → dataURL → PNG → addImage)
-    const imgDataUrl = await fetchAsDataUrl(imageUrl);
-    if (imgDataUrl) {
-      try {
-        const header = toPptxBase64Header(imgDataUrl);
-        if (!/^image\/(png|jpeg);base64,/i.test(header)) throw new Error("unsupported header");
-        s.addImage({ data: header, ...L.img, sizing: { type: "contain", w: L.img.w, h: L.img.h } } as any);
-      } catch (e) {
-        s.addShape(PptxGenJS.ShapeType.roundRect, { ...L.img, fill: { color: brand.faint } } as any);
-        s.addText("addImage failed", {
-          x: L.img.x, y: L.img.y + L.img.h / 2 - 0.2, w: L.img.w, h: 0.4,
-          align: "center", fontFace: "Inter", fontSize: 12, color: "667085",
-        } as any);
-      }
+    // Image (via proxy)
+    const pngDataUrl = await fetchAsPngDataUrl(imageUrl);
+    if (pngDataUrl) {
+      s.addImage({
+        data: toPptxBase64Header(pngDataUrl),
+        ...L.img,
+        sizing: { type: "contain", w: L.img.w, h: L.img.h },
+      } as any);
     } else {
-      s.addShape(PptxGenJS.ShapeType.roundRect, { ...L.img, fill: { color: brand.faint }, line: { color: "D0D7E2", width: 1 } } as any);
+      s.addShape(PptxGenJS.ShapeType.roundRect, {
+        ...L.img, fill: { color: brand.faint }, line: { color: "D0D7E2", width: 1 },
+      } as any);
       s.addText("Image unavailable", {
         x: L.img.x, y: L.img.y + L.img.h / 2 - 0.2, w: L.img.w, h: 0.4,
         align: "center", fontFace: "Inter", fontSize: 12, color: "667085",
       } as any);
     }
 
-    // Bullets
+    // Specs
     if (bullets.length) {
-      s.addText(bullets.map((b) => `• ${b}`).join("\n"), { ...L.specs, fontSize: 12, fontFace: "Inter", color: "111827" } as any);
+      s.addText(bullets.map((b) => `• ${b}`).join("\n"), {
+        ...L.specs, fontSize: 12, fontFace: "Inter", color: "111827",
+      } as any);
     }
 
     // Description
     if (description) {
-      s.addText(description, { ...L.desc, align: "center", fontFace: "Inter", fontSize: 12, color: "344054", fit: "shrink" } as any);
+      s.addText(description, {
+        ...L.desc, align: "center", fontFace: "Inter", fontSize: 12, color: "344054", fit: "shrink",
+      } as any);
     }
 
     // Footer bar + code
     s.addShape(PptxGenJS.ShapeType.rect, { ...L.bar, fill: { color: brand.bar }, line: { color: brand.bar } } as any);
-    if (code) s.addText(code, { ...L.barText, fontFace: "Inter", fontSize: 12, color: "0B3A33", align: "left" } as any);
+    if (code) {
+      s.addText(code, { ...L.barText, fontFace: "Inter", fontSize: 12, color: "0B3A33", align: "left" } as any);
+    }
   }
 
-  // Thanks slide
+  // Thank-you
   {
     const s = pptx.addSlide();
     s.background = { color: brand.bg };
     s.addText("Thank you", {
-      x: 0.8, y: 2.0, w: 8.5, h: 1, fontSize: 36, bold: true, color: "0F172A", align: "center",
+      x: 0.8, y: 2.0, w: 8.5, h: 1, fontFace: "Inter", fontSize: 36, bold: true, color: "0F172A", align: "center",
     } as any);
     const parts: string[] = [];
     if (client.contactName) parts.push(client.contactName);
     if (client.contactEmail) parts.push(client.contactEmail);
     if (client.contactPhone) parts.push(client.contactPhone);
-    if (parts.length) s.addText(parts.join("  ·  "), {
-      x: 0.8, y: 3.2, w: 8.5, h: 0.8, fontSize: 16, color: "666666", align: "center",
-    } as any);
+    if (parts.length) {
+      s.addText(parts.join("  ·  "), {
+        x: 0.8, y: 3.2, w: 8.5, h: 0.8, fontFace: "Inter", fontSize: 16, color: "666666", align: "center",
+      } as any);
+    }
   }
 
   await pptx.writeFile({ fileName: `${client.projectName || "Project Selection"}.pptx` } as any);
 }
 
-// Public exports
+// public names
 export const exportPptxV2 = exportSelectionToPptx;
 export const exportPptx   = exportSelectionToPptx;
