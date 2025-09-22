@@ -7,6 +7,51 @@ const CORS: Record<string, string> = {
   "access-control-allow-headers": "content-type",
   "access-control-expose-headers": "content-type,cache-control",
 };
+export async function handler(event) {
+  try {
+    const url = event.queryStringParameters?.url;
+    if (!url) {
+      return { statusCode: 400, body: "Missing url" };
+    }
+
+    const upstream = await fetch(url, {
+      redirect: "follow",
+      headers: {
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120 Safari/537.36",
+        accept: "*/*",
+      },
+    });
+
+    if (!upstream.ok) {
+      return {
+        statusCode: upstream.status,
+        headers: { "access-control-allow-origin": "*" },
+        body: `Upstream ${upstream.status} ${upstream.statusText}`,
+      };
+    }
+
+    const contentType = upstream.headers.get("content-type") || "application/octet-stream";
+    const arr = await upstream.arrayBuffer();
+    const base64 = Buffer.from(arr).toString("base64");
+
+    return {
+      statusCode: 200,
+      headers: {
+        "content-type": contentType,
+        "access-control-allow-origin": "*",
+        "cache-control": "public, max-age=86400",
+      },
+      body: base64,
+      isBase64Encoded: true, // important: send binary back to browser
+    };
+  } catch (e) {
+    return {
+      statusCode: 502,
+      headers: { "access-control-allow-origin": "*" },
+      body: `proxy error: ${e?.message || e}`,
+    };
+  }
+}
 
 export const handler: Handler = async (event) => {
   try {
