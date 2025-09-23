@@ -6,6 +6,21 @@ import ProductGallery from "./components/ProductGallery";
 import type { ClientInfo } from "./types";
 import { useProducts } from "./hooks/useProducts";
 
+<div className="toolbar">
+  <input className="search" ... />
+  <select className="cat" value={cat} onChange={e=>setCat(e.target.value)}>
+    {categories.map(c => <option key={c} value={c}>{c}</option>)}
+  </select>
+  <select className="sort" value={sort} onChange={e=>setSort(e.target.value as any)}>
+    <option value="sheet">Sheet order</option>
+    <option value="name">Name (A–Z)</option>
+  </select>
+  <div className="spacer" />
+  <div className="muted">Selected: {selectedList.length}</div>
+  <button className="primary" onClick={exportPptx}>Export PPTX</button>
+</div>
+
+
 export default function App() {
   const [client, setClient] = useState<ClientInfo>({
     clientName: "",
