@@ -4,3 +4,21 @@
 
 :root { color-scheme: light; }
 body { @apply bg-slate-50 text-slate-800; font-family: system-ui, sans-serif; }
+
+/* Toolbar layout */
+.toolbar { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+
+/* Search grows, selects do NOT */
+.toolbar .search { flex:1 1 320px; }
+
+.toolbar .cat,
+.toolbar .sort {
+  flex:0 0 auto;
+  width:220px;            /* <= shrink here */
+  max-width:220px;
+}
+
+/* Optional: a bit narrower on small screens */
+@media (max-width: 640px) {
+  .toolbar .cat, .toolbar .sort { width:160px; }
+}
