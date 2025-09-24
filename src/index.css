@@ -14,7 +14,7 @@ body { @apply bg-slate-50 text-slate-800; font-family: system-ui, sans-serif; }
 
 .toolbar { display:flex; gap:12px; align-items:center; }
 .toolbar .search { flex:1; min-width:220px; }
-.toolbar select { height:36px; }
+.toolbar select { max-width: 260px; width: auto; }
 .toolbar .cat { width:200px; max-width:200px; }  /* add className="cat" on the category select */
 
 .toolbar .sort {
