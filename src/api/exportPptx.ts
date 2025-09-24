@@ -1,8 +1,9 @@
 // src/api/exportPptx.ts
 import type { Product } from "../types";
 
-const FULL_W = 10;       // pptxgenjs 16:9 width (inches)
-const FULL_H = 5.625;    // pptxgenjs 16:9 height
+/** 16:9 slide size used by pptxgenjs (inches) */
+const FULL_W = 10;
+const FULL_H = 5.625;
 
 const title = (s?: string) => (s ?? "").trim() || "—";
 
@@ -28,8 +29,15 @@ export type ExportMeta = {
   date?: string;
 };
 
+/**
+ * Build and download the PPTX.
+ * Requires static images in /public/pptx/: cover1.jpg, cover2.jpg, warranty.jpg, service.jpg
+ */
 export async function exportPptx(selectedList: Product[], meta: ExportMeta = {}) {
-  if (!selectedList.length) return;
+  if (!selectedList?.length) {
+    alert("Select at least one product.");
+    return;
+  }
 
   const {
     projectName = "Project Selection",
@@ -43,16 +51,25 @@ export async function exportPptx(selectedList: Product[], meta: ExportMeta = {})
   const PptxGenJS = (await import("pptxgenjs")).default as any;
   const pptx = new PptxGenJS();
 
-  // -------- COVERS (two bathroom photos) --------
+  // ---------- FRONT COVERS (2 bathroom photos) ----------
   for (const url of ["/pptx/cover1.jpg", "/pptx/cover2.jpg"]) {
     try {
       const dataUrl = await urlToDataUrl(url);
       const s = pptx.addSlide();
-      s.addImage({ data: dataUrl, x: 0, y: 0, w: FULL_W, h: FULL_H, sizing: { type: "cover", w: FULL_W, h: FULL_H } } as any);
-    } catch {}
+      s.addImage({
+        data: dataUrl,
+        x: 0,
+        y: 0,
+        w: FULL_W,
+        h: FULL_H,
+        sizing: { type: "cover", w: FULL_W, h: FULL_H },
+      } as any);
+    } catch {
+      // ignore if image missing
+    }
   }
 
-  // Optional title/about slide
+  // ---------- OPTIONAL TITLE SLIDE ----------
   pptx.addSlide().addText(
     [
       { text: projectName, options: { fontSize: 28, bold: true } },
@@ -65,47 +82,79 @@ export async function exportPptx(selectedList: Product[], meta: ExportMeta = {})
     { x: 0.6, y: 0.6, w: 12, h: 6 }
   );
 
-  // -------- PRODUCT SLIDES --------
+  // ---------- PRODUCT SLIDES ----------
   for (const p of selectedList) {
     const s = pptx.addSlide();
 
-    // image
+    // image (left)
     try {
       if (p.imageProxied) {
         const dataUrl = await urlToDataUrl(p.imageProxied);
-        s.addImage({ data: dataUrl, x: 0.5, y: 0.7, w: 5.5, h: 4.1, sizing: { type: "contain", w: 5.5, h: 4.1 } } as any);
+        s.addImage({
+          data: dataUrl,
+          x: 0.5,
+          y: 0.7,
+          w: 5.5,
+          h: 4.1,
+          sizing: { type: "contain", w: 5.5, h: 4.1 },
+        } as any);
       }
-    } catch {}
+    } catch {
+      // continue without image
+    }
 
-    // name + sku
+    // title + sku (right)
     s.addText(title(p.name), { x: 6.2, y: 0.7, w: 6.2, h: 0.6, fontSize: 20, bold: true });
     s.addText(p.code ? `SKU: ${p.code}` : "", { x: 6.2, y: 1.4, w: 6.2, h: 0.4, fontSize: 12 });
 
-    // description + bullet specs + category
+    // description + bullet specs + category (right)
     const lines: string[] = [];
     if (p.description) lines.push(p.description);
     if (p.specsBullets?.length) lines.push("• " + p.specsBullets.join("\n• "));
     if (p.category) lines.push(`\nCategory: ${p.category}`);
     s.addText(lines.join("\n"), { x: 6.2, y: 1.9, w: 6.2, h: 3.7, fontSize: 12 });
 
-    // links
-    if (p.url)
+    // links (right)
+    if (p.url) {
       s.addText("Product page", {
-        x: 6.2, y: 5.8, w: 6.2, h: 0.4, fontSize: 12, underline: true, hyperlink: { url: p.url }
+        x: 6.2,
+        y: 5.8,
+        w: 6.2,
+        h: 0.4,
+        fontSize: 12,
+        underline: true,
+        hyperlink: { url: p.url },
       });
-    if (p.pdfUrl)
+    }
+    if (p.pdfUrl) {
       s.addText("Spec sheet (PDF)", {
-        x: 6.2, y: 6.2, w: 6.2, h: 0.4, fontSize: 12, underline: true, hyperlink: { url: p.pdfUrl }
+        x: 6.2,
+        y: 6.2,
+        w: 6.2,
+        h: 0.4,
+        fontSize: 12,
+        underline: true,
+        hyperlink: { url: p.pdfUrl },
       });
+    }
   }
 
-  // -------- BACK PAGES --------
+  // ---------- BACK PAGES (warranty then service) ----------
   for (const url of ["/pptx/warranty.jpg", "/pptx/service.jpg"]) {
     try {
       const dataUrl = await urlToDataUrl(url);
       const s = pptx.addSlide();
-      s.addImage({ data: dataUrl, x: 0, y: 0, w: FULL_W, h: FULL_H, sizing: { type: "cover", w: FULL_W, h: FULL_H } } as any);
-    } catch {}
+      s.addImage({
+        data: dataUrl,
+        x: 0,
+        y: 0,
+        w: FULL_W,
+        h: FULL_H,
+        sizing: { type: "cover", w: FULL_W, h: FULL_H },
+      } as any);
+    } catch {
+      // ignore if image missing
+    }
   }
 
   const filename = `${(projectName || "Selection").replace(/[^\w-]+/g, "_")}.pptx`;
