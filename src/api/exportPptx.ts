@@ -109,11 +109,11 @@ export async function exportPptx(selectedList: Product[], meta: Meta) { /* ... *
     s.addText(p.code ? `SKU: ${p.code}` : "", { x: 6.2, y: 1.4, w: 6.2, h: 0.4, fontSize: 12 });
 
     // description + bullet specs + category (right)
-    const lines: string[] = [];
-    if (p.description) lines.push(p.description);
-    if (p.specsBullets?.length) lines.push("• " + p.specsBullets.join("\n• "));
-    if (p.category) lines.push(`\nCategory: ${p.category}`);
-    s.addText(lines.join("\n"), { x: 6.2, y: 1.9, w: 6.2, h: 3.7, fontSize: 12 });
+   const lines: string[] = [];
+if (p.description) lines.push(p.description);
+if (p.specsBullets?.length) lines.push("• " + p.specsBullets.join("\n• "));
+if (p.category) lines.push(`\nCategory: ${p.category}`);
+s.addText(lines.join("\n"), { x: 6.2, y: 1.9, w: 6.2, h: 3.7, fontSize: 12 });
 
     // links (right)
     if (p.url) {
