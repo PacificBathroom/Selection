@@ -1,58 +1,229 @@
-// at top (near other helpers)
-const FULL_W = 10;      // pptxgenjs default 16:9 width (inches)
-const FULL_H = 5.625;   // pptxgenjs default 16:9 height
+// src/App.tsx
+import { useEffect, useMemo, useState } from "react";
+import type { Product } from "./types";
+import { fetchProducts } from "./lib/products";
+import { exportPptx } from "./api/exportPptx";
 
-async function exportPptx() {
-  if (selectedList.length === 0) return alert("Select at least one product.");
-  const PptxGenJS = (await import("pptxgenjs")).default as any;
-  const pptx = new PptxGenJS();
+// small helpers
+const includes = (h: string, n: string) => h.toLowerCase().includes(n.toLowerCase());
+const title = (s?: string) => (s ?? "").trim() || "—";
 
-  // ----- two bathroom cover photos first -----
-  for (const url of ["/pptx/cover1.jpg", "/pptx/cover2.jpg"]) {
-    try {
-      const dataUrl = await urlToDataUrl(url);
-      const s = pptx.addSlide();
-      s.addImage({ data: dataUrl, x: 0, y: 0, w: FULL_W, h: FULL_H, sizing: { type: "cover", w: FULL_W, h: FULL_H } } as any);
-    } catch {}
-  }
-
-  // (optional) remove this simple title slide if you don't want it)
-  // pptx.addSlide().addText([...], { x: 0.6, y: 0.6, w: 12, h: 6 });
-
-  // ----- product slides -----
-  for (const p of selectedList) {
-    const s = pptx.addSlide();
-    try {
-      if (p.imageProxied) {
-        const dataUrl = await urlToDataUrl(p.imageProxied);
-        s.addImage({ data: dataUrl, x: 0.5, y: 0.7, w: 5.5, h: 4.1, sizing: { type: "contain", w: 5.5, h: 4.1 } } as any);
+export default function App() {
+  // load products from Google Sheets
+  const [items, setItems] = useState<Product[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    (async () => {
+      try {
+        const ps = await fetchProducts("Products!A:Z");
+        setItems(ps);
+      } catch (e: any) {
+        setErr(e?.message || "fetch error");
       }
-    } catch {}
+    })();
+  }, []);
 
-    // real bullets for specs + description/category
-    const textRuns: any[] = [];
-    if (p.description) textRuns.push({ text: p.description + "\n", options: { fontSize: 12 } });
-    if (p.specsBullets?.length) {
-      for (const b of p.specsBullets) textRuns.push({ text: b, options: { fontSize: 12, bullet: true } });
+  // selection
+  const keyOf = (p: Product) => (p.code || p.name || "") + "::" + (p.url || "");
+  const [selected, setSelected] = useState<Record<string, boolean>>({});
+  const toggle = (p: Product) => setSelected(s => ({ ...s, [keyOf(p)]: !s[keyOf(p)] }));
+  const selectedList = useMemo(
+    () => (items ?? []).filter(p => selected[keyOf(p)]),
+    [items, selected]
+  );
+
+  // filters
+  const [q, setQ] = useState("");
+  const [cat, setCat] = useState("All");
+  const [sort, setSort] = useState<"sheet" | "name">("sheet");
+
+  const categories = useMemo(() => {
+    const s = new Set<string>();
+    for (const p of items ?? []) if (p.category) s.add(p.category);
+    return ["All", ...Array.from(s).sort()];
+  }, [items]);
+
+  const visible = useMemo(() => {
+    let a = [...(items ?? [])];
+    if (q) {
+      a = a.filter(
+        p =>
+          includes(p.name ?? "", q) ||
+          includes(p.code ?? "", q) ||
+          includes(p.description ?? "", q) ||
+          includes(p.category ?? "", q)
+      );
     }
-    if (p.category) textRuns.push({ text: `\nCategory: ${p.category}`, options: { fontSize: 11 } });
-    if (textRuns.length) s.addText(textRuns, { x: 6.2, y: 1.9, w: 6.2, h: 3.7 });
+    if (cat !== "All") a = a.filter(p => p.category === cat);
+    if (sort === "name") a.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+    return a;
+  }, [items, q, cat, sort]);
 
-    s.addText((p.name ?? "—").trim() || "—", { x: 6.2, y: 0.7, w: 6.2, h: 0.6, fontSize: 20, bold: true });
-    s.addText(p.code ? `SKU: ${p.code}` : "", { x: 6.2, y: 1.4, w: 6.2, h: 0.4, fontSize: 12 });
-    if (p.url)    s.addText("Product page",     { x: 6.2, y: 5.8, w: 6.2, h: 0.4, fontSize: 12, underline: true, hyperlink: { url: p.url } });
-    if (p.pdfUrl) s.addText("Spec sheet (PDF)", { x: 6.2, y: 6.2, w: 6.2, h: 0.4, fontSize: 12, underline: true, hyperlink: { url: p.pdfUrl } });
-  }
+  // header form (meta used by export)
+  const [projectName, setProjectName] = useState("Project Selection");
+  const [clientName, setClientName] = useState("");
+  const [contactName, setContactName] = useState("");
+  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
+  const [date, setDate] = useState("");
 
-  // ----- back pages: warranty then service -----
-  for (const url of ["/pptx/warranty.jpg", "/pptx/service.jpg"]) {
-    try {
-      const dataUrl = await urlToDataUrl(url);
-      const s = pptx.addSlide();
-      s.addImage({ data: dataUrl, x: 0, y: 0, w: FULL_W, h: FULL_H, sizing: { type: "cover", w: FULL_W, h: FULL_H } } as any);
-    } catch {}
-  }
+  // export button handler
+  const onExport = () =>
+    exportPptx(selectedList, { projectName, clientName, contactName, email, phone, date });
 
-  const filename = `${(projectName || "Selection").replace(/[^\w-]+/g, "_")}.pptx`;
-  await pptx.writeFile({ fileName: filename });
+  return (
+    <div className="wrap">
+      <h1>Product Selection</h1>
+
+      {/* top form */}
+      <div className="card form">
+        <div className="grid2">
+          <label>
+            <div>Project name</div>
+            <input
+              value={projectName}
+              onChange={e => setProjectName(e.target.value)}
+              placeholder="Project Selection"
+            />
+          </label>
+          <label>
+            <div>Client name</div>
+            <input
+              value={clientName}
+              onChange={e => setClientName(e.target.value)}
+              placeholder="Client name"
+            />
+          </label>
+        </div>
+        <div className="grid2">
+          <label>
+            <div>Your name (contact)</div>
+            <input
+              value={contactName}
+              onChange={e => setContactName(e.target.value)}
+              placeholder="Your Name"
+            />
+          </label>
+          <label>
+            <div>Date</div>
+            <input
+              value={date}
+              onChange={e => setDate(e.target.value)}
+              placeholder="dd/mm/yyyy"
+            />
+          </label>
+        </div>
+        <div className="grid2">
+          <label>
+            <div>Email</div>
+            <input
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              placeholder="you@example.com"
+            />
+          </label>
+          <label>
+            <div>Phone</div>
+            <input
+              value={phone}
+              onChange={e => setPhone(e.target.value)}
+              placeholder="0000 000 000"
+            />
+          </label>
+        </div>
+      </div>
+
+      {/* toolbar */}
+      <div className="toolbar">
+        <input
+          className="search"
+          placeholder="Search products, SKU, description..."
+          value={q}
+          onChange={e => setQ(e.target.value)}
+        />
+        <select
+          className="categorySelect"
+          style={{ maxWidth: 260 }}
+          value={cat}
+          onChange={e => setCat(e.target.value)}
+        >
+          {categories.map(c => (
+            <option key={c} value={c}>
+              {c}
+            </option>
+          ))}
+        </select>
+        <select value={sort} onChange={e => setSort(e.target.value as any)}>
+          <option value="sheet">Sheet order</option>
+          <option value="name">Name (A–Z)</option>
+        </select>
+        <div className="spacer" />
+        <div className="muted">Selected: {selectedList.length}</div>
+        <button className="primary" onClick={onExport}>
+          Export PPTX
+        </button>
+      </div>
+
+      {/* status */}
+      {err && <p className="error">Error: {err}</p>}
+      {!items && !err && <p>Loading…</p>}
+
+      {/* product grid */}
+      <div className="grid">
+        {(visible ?? []).map((p, i) => {
+          const k = keyOf(p);
+          const isSel = !!selected[k];
+          return (
+            <div className={"card product" + (isSel ? " selected" : "")} key={k + i}>
+              <label className="checkbox">
+                <input type="checkbox" checked={isSel} onChange={() => toggle(p)} />
+              </label>
+
+              <div className="thumb">
+                {p.imageProxied ? (
+                  <img src={p.imageProxied} alt={p.name || p.code || "product"} />
+                ) : (
+                  <div className="ph">No image</div>
+                )}
+              </div>
+
+              <div className="body">
+                <div className="name">{title(p.name)}</div>
+                {p.code && <div className="sku">SKU: {p.code}</div>}
+
+                {p.description && <p className="desc">{p.description}</p>}
+
+                {p.specsBullets && p.specsBullets.length > 0 && (
+                  <ul className="specs">
+                    {p.specsBullets.slice(0, 4).map((s, j) => (
+                      <li key={j}>{s}</li>
+                    ))}
+                  </ul>
+                )}
+
+                <div className="links">
+                  {p.url && (
+                    <a href={p.url} target="_blank" rel="noreferrer">
+                      Product page
+                    </a>
+                  )}
+                  {p.pdfUrl && (
+                    <a
+                      href={`/api/pdf-proxy?url=${encodeURIComponent(p.pdfUrl)}`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Spec sheet (PDF)
+                    </a>
+                  )}
+                </div>
+
+                {p.category && <div className="category">Category: {p.category}</div>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
