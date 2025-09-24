@@ -33,7 +33,8 @@ export type ExportMeta = {
  * Build and download the PPTX.
  * Requires static images in /public/pptx/: cover1.jpg, cover2.jpg, warranty.jpg, service.jpg
  */
-export async function exportPptx(selectedList: Product[], meta: ExportMeta = {}) {
+export async function exportPptx(selectedList: Product[], meta: Meta) { /* ... */ }
+
   if (!selectedList?.length) {
     alert("Select at least one product.");
     return;
