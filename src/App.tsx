@@ -3,6 +3,10 @@ import { useEffect, useMemo, useState } from "react";
 import type { Product } from "./types";
 import { fetchProducts } from "./lib/products";
 import { exportPptx } from "./api/exportPptx";
+// ...
+const onExport = () =>
+  exportPptx(selectedList, { projectName, clientName, contactName, email, phone, date });
+
 
 // small helpers
 const includes = (h: string, n: string) => h.toLowerCase().includes(n.toLowerCase());
